@@ -32,4 +32,7 @@ import numpy as np
 # Module-level variables
 
 # The grid of points on which we want to evaluate the field
-X, Y, Z = np.mgrid[-0.15]
+X, Y, Z = np.mgrid[0:10:100j, 0:10:100j, 0:10:100j]
+
+#############################################################################
+# A current loop class
