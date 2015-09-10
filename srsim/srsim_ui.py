@@ -66,15 +66,15 @@ class ControlPanel(HasTraits):
                 Group(
                     Item(name = 'wind_field',
                         editor = EnumEditor(values = {
-                            'uniform'  : 'Uniform wind field',
-                            'external' : 'Load External wind field data',}),
+                            'uniform'  : '1:Uniform wind field',
+                            'external' : '2:Load External wind field data',}),
                         style = 'custom'),
                     label = 'Wind', dock = 'tab'),
                 Group(
                     Item(name = 'plume_model',
                         editor = EnumEditor(values = {
-                            'farrell'  : 'Farrell plume model',
-                            'other'    : 'Other plume model...',}),
+                            'farrell'  : '1:Farrell plume model',
+                            'other'    : '2:Other plume model...',}),
                         style = 'custom'),
                     label = 'Plume', dock = 'tab'),
                 Group(
