@@ -89,18 +89,20 @@ class MainWindow(HasTraits):
         ...
         '''
     # scene of experiment area
-    scene = Instance(MlabSceneModel, (), editor=SceneEditor)
+    scene = Instance(MlabSceneModel, ())
     # control panel
-    panel = Instance(ControlPanel)
+    panel = Instance(ControlPanel, ())
     # simulator running state display
     srsim_state_string = String()
 
-    def _panel_default(self):
-        return ControlPanel()
-
+    ##################################
+    # The UI view to show the user
     view = View(
             HSplit(
-                Item('scene'),
+                Item(name = 'scene',
+                    editor = SceneEditor(),
+                    show_label = False,
+                    resizable = True),
                 VSplit(
                     Item('panel', style = 'custom'),
                     Item('srsim_state_string',show_label=False,
@@ -110,6 +112,22 @@ class MainWindow(HasTraits):
             title = 'Sniffer Robots Simulator 3D',
             height = 0.75, width = 0.75,
             )
+    ##################################
+    # Init
+    def __init__(self, **traits):
+        HasTraits.__init__(self, **traits)
+
+    ##################################
+    # Trait handlers
+
+    ##################################
+    # Private interface
+    def _scene_default(self):
+        scene = MlabSceneModel()
+        return scene
+    def _panel_default(self):
+        return ControlPanel()
+
 
 ##############################################################################
 # Execute if running this script
