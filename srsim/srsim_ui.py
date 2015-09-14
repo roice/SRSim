@@ -29,7 +29,7 @@ Documentation and tests are included in ...
 import numpy as np
 
 # Enthought imports
-from traits.api import *
+from traits.api import HasTraits, Array, Instance, Button, Enum, String
 from traitsui.api import View, Item, Group, HSplit, VSplit, ButtonEditor, EnumEditor
 from mayavi.core.ui.api import MlabSceneModel, SceneEditor
 
