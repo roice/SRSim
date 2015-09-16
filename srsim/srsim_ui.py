@@ -32,10 +32,13 @@ from traits.api import HasTraits, Array, Instance, Button, Enum, String,\
         Range, Array, Tuple, Float
 from traitsui.api import View, Item, Group, HSplit, VSplit,\
         ButtonEditor, EnumEditor, RangeEditor
-from mayavi.core.ui.api import MlabSceneModel, SceneEditor
+from mayavi import mlab
+from mayavi.core.ui.api import MlabSceneModel, SceneEditor, MayaviScene
 # Thread related imports
 from threading import Thread
 from time import sleep
+# SRsim project
+from srsim_wind_model import srsim_wind_uniform_tinv_get_uvw
 
 #############################################################################
 # Module-level variables
@@ -57,22 +60,38 @@ class SimulationThread(Thread):
     ''' Simulation loop.
     '''
     wants_abort = False
+    #scene = Instance(MlabSceneModel)
+
+
 
     def run(self):
         ''' Runs the simulation loop
         '''
         # print configuration of simulator
-        self.display('------ Settings ------')
-        temp_str = 'Sim Area (L*W*H m): %.1f * %.1f * %.1f' %(10, 10, 01)
-        self.display(temp_str)
-        self.display('====== Simulation started ======')
-        sim_step = 0 # Reset simulation step
+        temp_str = 'Sim Area (L*W*H): %.1f m * %.1f m * %.1f m\n\
+                Grid size: 0.1 m' %(self.field_length, self.field_width,
+                        self.field_height)
+        self.display('====== Settings ======' + '\n' +
+                temp_str + '\n' + '====== Simulation started ======')
+        # Reset simulation step
+        sim_step = 0
+        # init simulation
+        x, y, z = self.points
+        ''' init wind field '''
+        wind_u, wind_v, wind_w = srsim_wind_uniform_tinv_get_uvw(x, y, z, [1,2,3])
+        ''' plot wind field '''
+        self.wind.mlab_source.set(wind_u=wind_u)
+        #flow = self.scene.mlab.vector_scatter(x, y, z, wind_u, wind_v, wind_w)
+        #self.scene.mlab.test_mesh()
+        #self.sim_wind_init(x,y,z,wind_u,wind_v,wind_w)
+        #mlab.view(120, 60, 150)
         while not self.wants_abort:
             sim_step += 1
-            ''' Calculate wind field '''
-            ''' Calculate pollutant diffusion '''
-            ''' Calculate robot position '''
-            sleep(0.1)
+            ''' Update wind field '''
+            ''' Update pollutant diffusion '''
+            ''' Update robot position '''
+            # update data for animation in simulation scene window
+            sleep(1)
         self.display('###### Simulation stopped ######')
 
 #############################################################################
@@ -81,6 +100,7 @@ class SimulationThread(Thread):
 #!
 
 # ControlPanel class, srsim UI
+# input parameter 1: scene, the mayaviscene display outside this panel
 class ControlPanel(HasTraits):
     ''' This object is the core of the traitsUI interface. Its view is the
     right panel of the application, and it hosts the method for interaction
@@ -96,7 +116,6 @@ class ControlPanel(HasTraits):
     wind_field = Enum('uniform', 'external')
     # ---- Plume tab ----
     plume_model = Enum('farrell', 'other')
-    # Simu State Text box, not in this class
     # simulator running state display
     srsim_state_display = String()
 
@@ -106,8 +125,11 @@ class ControlPanel(HasTraits):
     points = Tuple(Array, Array, Array)
 
     ###################################
-    # thread
+    # thread and other instances
     sim_thread = Instance(SimulationThread)
+    scene = Instance(MlabSceneModel)
+    # The "wind" which is a Mayavi streamline module.
+    wind = Instance(HasTraits)
 
     ###################################
     # view
@@ -157,22 +179,8 @@ class ControlPanel(HasTraits):
                 )
             )
 
-    def _start_stop_simulation_fired(self):
-        ''' Callback of the "start/stop simulation" button, this starts
-            the simulation thread, or kills it
-        '''
-        if self.sim_thread and self.sim_thread.isAlive():
-            self.sim_thread.wants_abort = True
-        else:
-            self.sim_thread = SimulationThread()
-            self.sim_thread.display = self.add_text_line
-            self.sim_thread.start()
-
-    def add_text_line(self, string):
-        ''' Adds a line to Simulation State text box display
-        '''
-        self.srsim_state_display = (self.srsim_state_display +
-                string + "\n")[0:1000]
+    ###################################
+    # Init functions
 
     # Field size default: 10.0x10.0x10.0m
     def _field_length_default(self):
@@ -189,6 +197,42 @@ class ControlPanel(HasTraits):
         x, y, z = np.mgrid[0:self.field_length:1, 0:self.field_width:1,
                 0:self.field_height:1]
         return x, y, z
+    def _wind_default(self):
+        x, y, z = self.points
+        ''' init wind field '''
+        wind_u, wind_v, wind_w = srsim_wind_uniform_tinv_get_uvw(x, y, z, [1,0,0])
+        ''' plot wind field '''
+        f = self.scene.mlab.quiver3d(x,y,z,wind_u,wind_v,wind_w)
+        return f
+
+
+    ###################################
+    # Widgets handlers
+    def _start_stop_simulation_fired(self):
+        ''' Callback of the "start/stop simulation" button, this starts
+            the simulation thread, or kills it
+        '''
+        if self.sim_thread and self.sim_thread.isAlive():
+            self.sim_thread.wants_abort = True
+        else:
+            # create thread
+            self.sim_thread = SimulationThread()
+            # link functions and parameters
+            self.sim_thread.display = self.add_text_line
+            self.sim_thread.field_length = self.field_length
+            self.sim_thread.field_width = self.field_width
+            self.sim_thread.field_height = self.field_height
+            self.sim_thread.points = self.points
+            self.sim_thread.wind = self.wind
+            self.sim_thread.start()
+
+    ###################################
+    # Private functions
+    def add_text_line(self, string):
+        ''' Adds a line to Simulation State text box display
+        '''
+        self.srsim_state_display = (self.srsim_state_display +
+                string + "\n")[0:1000]
 
 # MainWindow class, srsim UI
 class MainWindow(HasTraits):
@@ -199,31 +243,23 @@ class MainWindow(HasTraits):
     # scene of experiment area
     scene = Instance(MlabSceneModel, ())
     # control panel
-    panel = Instance(ControlPanel, ())
-
-
-    ##################################
-    # Init
-    def __init__(self, **traits):
-        HasTraits.__init__(self, **traits)
+    panel = Instance(ControlPanel)
 
     ##################################
     # Trait handlers
 
     ##################################
     # Private interface
-    def _scene_default(self):
-        scene = MlabSceneModel()
-        return scene
     def _panel_default(self):
-        return ControlPanel()
+        # pass self.scene to control panel
+        return ControlPanel(scene = self.scene)
 
     ##################################
     # The UI view to show the user
     view = View(
             HSplit(
                 Item(name = 'scene',
-                    editor = SceneEditor(),
+                    editor = SceneEditor(scene_class=MayaviScene),
                     show_label = False),
                 Item('panel', style = 'custom'),
                     show_labels = False,),
