@@ -29,70 +29,17 @@ Documentation and tests are included in ...
 import numpy as np
 # Enthought imports
 from traits.api import HasTraits, Array, Instance, Button, Enum, String,\
-        Range, Array, Tuple, Float
+        Range, Array, Tuple, Int, Float, Event, on_trait_change
 from traitsui.api import View, Item, Group, HSplit, VSplit,\
-        ButtonEditor, EnumEditor, RangeEditor
+        ButtonEditor, TextEditor, EnumEditor, RangeEditor, Handler
 from mayavi import mlab
 from mayavi.core.ui.api import MlabSceneModel, SceneEditor, MayaviScene
 # Thread related imports
 from threading import Thread
 from time import sleep
 # SRsim project
+from srsim_loop import SimulationThread
 from srsim_wind_model import srsim_wind_uniform_tinv_get_uvw
-
-#############################################################################
-# Module-level variables
-
-# The grid of points on which we want to evaluate the field
-#X, Y, Z = np.mgrid[0:10:100j, 0:10:100j, 0:10:100j]
-
-#############################################################################
-#! Threads and flow control
-#!-------------------------
-#!
-#! There are two threads in this app:
-#!  * The GUI event loop, the only thread running at the start of the program
-#!  * The simulation thread, started through the GUI.
-#!
-
-# Simulation thread
-class SimulationThread(Thread):
-    ''' Simulation loop.
-    '''
-    wants_abort = False
-    #scene = Instance(MlabSceneModel)
-
-
-
-    def run(self):
-        ''' Runs the simulation loop
-        '''
-        # print configuration of simulator
-        temp_str = 'Sim Area (L*W*H): %.1f m * %.1f m * %.1f m\n\
-                Grid size: 0.1 m' %(self.field_length, self.field_width,
-                        self.field_height)
-        self.display('====== Settings ======' + '\n' +
-                temp_str + '\n' + '====== Simulation started ======')
-        # Reset simulation step
-        sim_step = 0
-        # init simulation
-        x, y, z = self.points
-        ''' init wind field '''
-        wind_u, wind_v, wind_w = srsim_wind_uniform_tinv_get_uvw(x, y, z, [1,2,3])
-        ''' plot wind field '''
-        self.wind.mlab_source.set(wind_u=wind_u)
-        #flow = self.scene.mlab.vector_scatter(x, y, z, wind_u, wind_v, wind_w)
-        #self.scene.mlab.test_mesh()
-        #self.sim_wind_init(x,y,z,wind_u,wind_v,wind_w)
-        #mlab.view(120, 60, 150)
-        while not self.wants_abort:
-            sim_step += 1
-            ''' Update wind field '''
-            ''' Update pollutant diffusion '''
-            ''' Update robot position '''
-            # update data for animation in simulation scene window
-            sleep(1)
-        self.display('###### Simulation stopped ######')
 
 #############################################################################
 #! GUI elements
@@ -107,29 +54,46 @@ class ControlPanel(HasTraits):
     between the objects and the GUI.
     '''
     ###################################
-    # Panel GUI
+    # ======== Panel GUI ========
     # ---- Control tab ----
-    start_stop_simulation = Button("Start/Stop simulation")
-    # Range of simulation field (length * width * height), unit: deci-meter
-    field_length, field_width, field_height = Float, Float, Float
+    button_start_stop_simulation = Button("Start/Stop simulation")
+    # Range of simulation area (length * width * height), unit: meter
+    area_length, area_width, area_height = Float, Float, Float
+    # simulation step count
+    text_sim_step_count = Int
+    #sim_thread_test = Instance(SimulationThread)
+    #text_sim_step_count = DelegatesTo("sim_thread_test", prefix="step_count")
     # ---- Wind tab ----
-    wind_field = Enum('uniform', 'external')
+    enum_wind_field_model = Enum('uniform', 'external')
     # ---- Plume tab ----
-    plume_model = Enum('farrell', 'other')
+    enum_plume_model = Enum('farrell', 'other')
     # simulator running state display
-    srsim_state_display = String()
+    textbox_sim_state_display = String()
 
     ###################################
-    # Parameter
-    # Tuple of x, y, z arrays where the simulation field is sampled.
-    points = Tuple(Array, Array, Array)
+    # ======== Data & Params ========
+    # Data can be updated from outside
+    # ---- simulation field grid, which is Tuple of x, y, z arrays
+    grid = Tuple(Array, Array, Array)
+    # ---- wind vector field
+    data_wind_field = Tuple(Array, Array, Array)
+    # ---- plume scalar field
+    #data_odor_field = Tuple(Array)
 
     ###################################
-    # thread and other instances
+    # ======== Events ========
+    # results draw update event
+    event_need_update_scene = Event
+
+    ###################################
+    # ======== Streamlines ========
+    sl_wind = Instance(HasTraits)
+
+    ###################################
+    # ======== Other ========
+    # simulation thread
     sim_thread = Instance(SimulationThread)
-    scene = Instance(MlabSceneModel)
-    # The "wind" which is a Mayavi streamline module.
-    wind = Instance(HasTraits)
+
 
     ###################################
     # view
@@ -137,102 +101,149 @@ class ControlPanel(HasTraits):
             Group(
                 Group(
                     Group(
-                        Item('field_length',
+                        Item('area_length',
                             editor = RangeEditor(   low = '1.0',
                                                     high = '50.0',
                                                     format = '%.1f',
                                                     mode = 'slider'),
                             label = 'L (meters)'),
-                        Item('field_width',
+                        Item('area_width',
                             editor = RangeEditor(   low = '1.0',
                                                     high = '50.0',
                                                     format = '%.1f',
                                                     mode = 'slider'),
                             label = 'W (meters)'),
-                        Item('field_height',
+                        Item('area_height',
                             editor = RangeEditor(   low = '1.0',
                                                     high = '50.0',
                                                     format = '%.1f',
                                                     mode = 'slider'),
                             label = 'H (meters)'),
-                        label = 'Field Range L/W/H', show_border=True),
-                    Item('start_stop_simulation', show_label = False),
+                        label = 'Area Size L/W/H', show_border=True),
+                    Group(
+                        Item('text_sim_step_count',
+                            editor = TextEditor(    auto_set = False,
+                                                    enter_set = False),
+                            label = 'Step', style = 'readonly'),
+                        label = 'Simulation Step count', show_border=True),
+                    Item('button_start_stop_simulation', show_label = False),
                     label = 'Control', dock = 'tab'),
                 Group(
-                    Item(name = 'wind_field',
+                    Item(name = 'enum_wind_field_model',
                         editor = EnumEditor(values = {
                             'uniform'  : '1:Uniform wind field',
                             'external' : '2:Load External wind field data',}),
                         style = 'custom'),
                     label = 'Wind', dock = 'tab'),
                 Group(
-                    Item(name = 'plume_model',
+                    Item(name = 'enum_plume_model',
                         editor = EnumEditor(values = {
                             'farrell'  : '1:Farrell plume model',
                             'other'    : '2:Other plume model...',}),
                         style = 'custom'),
                     label = 'Plume', dock = 'tab'),
                 layout = 'tabbed'),
-            Item(name = 'srsim_state_display',
+            Item(name = 'textbox_sim_state_display',
                         label = 'Simulator State', show_label=False,
                         resizable=True, springy=True, style='custom')
                 )
             )
 
     ###################################
-    # Init functions
+    # ======== Init functions ========
+    def __init__(self, scene):
+        HasTraits.__init__(self)
+        # pass 'scene' from MainWindow class
+        self.scene = scene
 
-    # Field size default: 10.0x10.0x10.0m
-    def _field_length_default(self):
-        field_length = 10.0
-        return field_length
-    def _field_width_default(self):
-        field_width = 10.0
-        return field_width
-    def _field_height_default(self):
-        field_height = 10.0
-        return field_height
+    # Area size default: 10.0x10.0x10.0m
+    def _area_length_default(self):
+        area_length = 10.0
+        return area_length
+    def _area_width_default(self):
+        area_width = 10.0
+        return area_width
+    def _area_height_default(self):
+        area_height = 10.0
+        return area_height
 
-    def _points_default(self):
-        x, y, z = np.mgrid[0:self.field_length:1, 0:self.field_width:1,
-                0:self.field_height:1]
+    def _text_sim_step_count(self):
+        c = 0
+        return c
+
+    def _grid_default(self):
+        x, y, z = np.mgrid[0:self.area_length:1, 0:self.area_width:1,
+                0:self.area_height:1]
         return x, y, z
-    def _wind_default(self):
-        x, y, z = self.points
-        ''' init wind field '''
-        wind_u, wind_v, wind_w = srsim_wind_uniform_tinv_get_uvw(x, y, z, [1,0,0])
-        ''' plot wind field '''
-        f = self.scene.mlab.quiver3d(x,y,z,wind_u,wind_v,wind_w)
-        return f
+
+    def _data_wind_field_default(self):
+        x, y, z = self.grid
+        u = np.ones_like(x)
+        v = np.ones_like(y)
+        w = np.ones_like(z)
+        return u, v, w
 
 
     ###################################
-    # Widgets handlers
-    def _start_stop_simulation_fired(self):
+    # ======== Listening ========
+    def _button_start_stop_simulation_fired(self):
         ''' Callback of the "start/stop simulation" button, this starts
             the simulation thread, or kills it
         '''
         if self.sim_thread and self.sim_thread.isAlive():
+            # kill simulation thread if it's running
             self.sim_thread.wants_abort = True
+            temp_str = 'step = %d' %self.text_sim_step_count
+            self.add_text_line(temp_str)
         else:
-            # create thread
+            # print simulator settings
+            temp_str = 'Sim Area (L*W*H): %.1f m * %.1f m * %.1f m\n\
+                    Grid size: 0.1 m' %(self.area_length, self.area_width,
+                            self.area_height)
+            self.add_text_line('====== Settings ======' + '\n' +
+                    temp_str + '\n' + '====== Simulation started ======')
+            # init scene
+            x, y, z = self.grid
+            wind_u, wind_v, wind_w = self.data_wind_field
+            wind_u, wind_v, wind_w = srsim_wind_uniform_tinv_get_uvw(x, y, z, [1,0,0])
+            self.sl_wind = self.scene.mlab.quiver3d(x,y,z,wind_u,wind_v,wind_w)
+            # create & start simulation thread
             self.sim_thread = SimulationThread()
-            # link functions and parameters
+            self.sim_thread.update_scene = self.func_event_update_scene
+            self.sim_thread.count_sim_step = self.func_sim_step_count
             self.sim_thread.display = self.add_text_line
-            self.sim_thread.field_length = self.field_length
-            self.sim_thread.field_width = self.field_width
-            self.sim_thread.field_height = self.field_height
-            self.sim_thread.points = self.points
-            self.sim_thread.wind = self.wind
+            self.sim_thread.grid = self.grid
+            self.sim_thread.data_wind_field = self.data_wind_field
             self.sim_thread.start()
+
+
+    def _event_need_update_scene_fired(self):
+        wind_u, wind_v, wind_w = self.data_wind_field
+        self.sl_wind.mlab_source.set(u=wind_u, v=wind_v, w=wind_w)
 
     ###################################
     # Private functions
     def add_text_line(self, string):
         ''' Adds a line to Simulation State text box display
         '''
-        self.srsim_state_display = (self.srsim_state_display +
+        self.textbox_sim_state_display = (self.textbox_sim_state_display +
                 string + "\n")[0:1000]
+    # trigger scene update event
+    def func_event_update_scene(self):
+        self.event_need_update_scene = True
+
+    def func_sim_step_count(self):
+        self.text_sim_step_count += 1
+
+class MainWindowHandler(Handler):
+    def close(self, info, is_OK):
+        # close panel.sim_thread thread
+        if(info.object.panel.sim_thread
+                and info.object.panel.sim_thread.isAlive()):
+            info.object.panel.sim_thread.wants_abort = True
+            while info.object.panel.sim_thread.isAlive():
+                sleep(0.1)
+        return True
 
 # MainWindow class, srsim UI
 class MainWindow(HasTraits):
@@ -266,6 +277,7 @@ class MainWindow(HasTraits):
             resizable = True,
             title = 'Sniffer Robots Simulator 3D',
             height = 0.75, width = 0.75,
+            handler = MainWindowHandler(),
             )
 
 ##############################################################################
