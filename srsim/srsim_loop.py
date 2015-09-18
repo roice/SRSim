@@ -57,5 +57,5 @@ class SimulationThread(Thread):
             # update data for animation in simulation scene window
             self.count_sim_step()
             GUI.invoke_later(self.update_scene)
-            sleep(0.5)
+            sleep(0.01)
         self.display('###### Simulation stopped ######')

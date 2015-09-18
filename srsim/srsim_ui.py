@@ -219,7 +219,9 @@ class ControlPanel(HasTraits):
 
     def _event_need_update_scene_fired(self):
         wind_u, wind_v, wind_w = self.data_wind_field
+        self.scene.disable_render = True
         self.sl_wind.mlab_source.set(u=wind_u, v=wind_v, w=wind_w)
+        self.scene.disable_render = False
 
     ###################################
     # Private functions
