@@ -1,0 +1,103 @@
+#!/usr/bin/python
+# coding=utf-8
+#
+# sniffer robots simulator
+#                        Save & get settings
+#
+# Author: Roice Luo <oroice@foxmail.com>
+# copyright (c) 2015 Roice Luo <https://github.com/roice>
+#
+# This library is free software; you can redistribute it and/or modify it
+# under the terms of the GNU Lesser General Public License as published by the
+# Free Software Foundation; either version 2.1 of the License, or (at your
+# option) any later version.
+#
+# This library is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public License
+# for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this library; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
+
+'''srsim config
+
+Documentation and tests are included in ...
+'''
+
+import ConfigParser
+import sys, os
+
+class Settings:
+    # [setup]
+    # simulation area size default values [l*w*h] meters
+    sim_area_size = 'None'
+    # odor source position
+    odor_source_pos = 'None'
+
+    # [wind]
+    # wind model
+    wind_model = 'None'
+    # grid size of advective flow field simulation (meter)
+    wind_grid_size = 'None'
+    # mean advection vector
+    wind_mean_vector = 'None'
+
+
+def set_sim_area_size(size):
+    Settings.sim_area_size = str(size)
+def get_sim_area_size():
+    return eval(Settings.sim_area_size)
+
+def set_odor_source_pos(pos):
+    Settings.odor_source_pos = str(pos)
+def get_odor_source_pos():
+    return eval(Settings.odor_source_pos)
+
+def set_wind_model(name):
+    Settings.wind_model = name
+def get_wind_model():
+    return Settings.wind_model
+
+def set_wind_grid_size(gsize):
+    Settings.wind_grid_size = gsize
+def get_wind_grid_size():
+    return Settings.wind_grid_size
+
+def set_mean_wind_vector(vector):
+    Settings.mean_wind_vector = str(vector)
+def get_mean_wind_vector():
+    return eval(Settings.mean_wind_vector)
+
+def load_settings():
+    # get abs path of this script
+    path = sys.path[0]
+    if os.path.isdir(path):
+        cfgfile_path = path + '/settings.cfg'
+    elif os.path.isfile(path):
+        cfgfile_path = os.path.dirname(path) + '/settings.cfg'
+    cp = ConfigParser.SafeConfigParser()
+    cp.read(cfgfile_path)
+    Settings.sim_area_size = cp.get('setup', 'sim_area_size')
+    Settings.odor_source_pos = cp.get('setup', 'odor_source_pos')
+    Settings.wind_model = cp.get('wind', 'wind_model')
+    Settings.wind_grid_size = cp.getfloat('wind', 'wind_grid_size')
+    Settings.mean_wind_vector = cp.get('wind', 'mean_wind_vector')
+
+def save_settings():
+    # get abs path of this script
+    path = sys.path[0]
+    if os.path.isdir(path):
+        cfgfile_path = path + '/settings.cfg'
+    elif os.path.isfile(path):
+        cfgfile_path = os.path.dirname(path) + '/settings.cfg'
+    cp = ConfigParser.SafeConfigParser()
+    cp.read(cfgfile_path)
+    cp.set('setup', 'sim_area_size', Settings.sim_area_size)
+    cp.set('setup', 'odor_source_pos', Settings.odor_source_pos)
+    cp.set('wind', 'wind_model', Settings.wind_model)
+    cp.set('wind', 'wind_grid_size', str(Settings.wind_grid_size))
+    cp.set('wind', 'mean_wind_vector', Settings.mean_wind_vector)
+    cp.write(open(cfgfile_path, 'w'))
+

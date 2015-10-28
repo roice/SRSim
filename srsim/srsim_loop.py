@@ -28,8 +28,8 @@ Documentation and tests are included in ...
 
 from threading import Thread
 from time import sleep
-#from traits.api import HasTraits, Int
-from srsim_wind_model import srsim_wind_uniform_tinv_get_uvw
+from srsim_wind_model import srsim_wind_simulator
+#from srsim_plume_model import srsim_plume_simulator
 from pyface.api import GUI
 
 class SimulationThread(Thread):
@@ -49,12 +49,14 @@ class SimulationThread(Thread):
             ''' Update wind field '''
             ''' Update pollutant diffusion '''
             ''' Update robot position '''
-            # mesh grid
+            # retrieve mesh grid
             x, y, z = self.grid
-            # change data
-            wind_u, wind_v, wind_w = self.data_wind_field
-            wind_u, wind_v, wind_w = srsim_wind_uniform_tinv_get_uvw(x, y, z, [1,2,3])
-            # update data for animation in simulation scene window
+            # compute wind field
+            if (self.wind_model != 'const'):# prevent useless computing
+                self.data_wind_field = srsim_wind_simulator(self.wind_model, self.grid, [1,2,3], 0)
+            # compute odor field
+            #srsim_plume_simulator('farrell', self.grid, self.data_wind_field, self.odor_source_pos, self.sim_step)
+            # update sim count & sim scene visualization
             self.count_sim_step()
             GUI.invoke_later(self.update_scene)
             sleep(0.02)

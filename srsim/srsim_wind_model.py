@@ -28,12 +28,14 @@ Documentation and tests are included in ...
 
 import numpy as np
 
+
 ''' Uniform time-invariant wind model
 input: x/y/z    points to sample, mgrid arrays
 input: vector   uniform wind vector
 output: u/v/w   wind vector arrays
 '''
-def srsim_wind_uniform_tinv_get_uvw(x, y, z, vector):
+def srsim_wind_uniform_tinv_get_uvw(grid, vector):
+    x, y, z = grid
     # init u/v/w arrays as the same shape of x/y/z
     u = np.ones_like(x)
     v = np.ones_like(y)
@@ -43,3 +45,24 @@ def srsim_wind_uniform_tinv_get_uvw(x, y, z, vector):
     v = vector[1]*v
     w = vector[2]*w
     return u, v, w
+
+def srsim_wind_const_mean_fluct(grid, vector):
+    return srsim_wind_uniform_tinv_get_uvw(grid, vector)
+
+# call wind simulation function according to wind model selected
+'''
+input:
+    wind_model_sel --- selected wind model name, type str
+        'const'             : constant wind field
+        'uniform_tv'        : uniform time-variant wind field
+        'const+fluc'        : constant wind + fluctuation(stochastic)
+        'uniform_tv+fluc'   : uniform time-variant + fluctuation(stochastic)
+    grid           --- mesh grid array 3d
+    init_vector    --- init wind vector (m/s,m/s,m/s)
+    time           --- calc wind field at this time
+'''
+def srsim_wind_simulator(wind_model_sel, grid, init_vector, time):
+    if (wind_model_sel == 'const'):
+        return srsim_wind_uniform_tinv_get_uvw(grid, init_vector)
+    elif (wind_model_sel == 'const+fluc'):
+        return srsim_wind_const_mean_fluct(grid, init_vector)

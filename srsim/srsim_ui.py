@@ -29,15 +29,18 @@ Documentation and tests are included in ...
 import numpy as np
 # Enthought imports
 from traits.api import HasTraits, Array, Instance, Button, Enum, String,\
-        Range, Array, Tuple, Int, Float, Event, on_trait_change
+        Range, Array, Tuple, Int, Float, Event, on_trait_change, Bool, List,\
+        Str
 from traitsui.api import View, Item, Group, HSplit, VSplit,\
-        ButtonEditor, TextEditor, EnumEditor, RangeEditor, Handler
+        ButtonEditor, TextEditor, EnumEditor, RangeEditor, Handler,\
+        CheckListEditor
 from mayavi import mlab
 from mayavi.core.ui.api import MlabSceneModel, SceneEditor, MayaviScene
 # Thread related imports
 from threading import Thread
 from time import sleep
 # SRsim project
+import srsim_config as Config
 from srsim_loop import SimulationThread
 from srsim_wind_model import srsim_wind_uniform_tinv_get_uvw
 
@@ -45,8 +48,7 @@ from srsim_wind_model import srsim_wind_uniform_tinv_get_uvw
 #! Global parameters
 #!------------------
 #!
-# simulation area size default values [l*w*h] meters
-default_area_size = [10.0, 10.0, 10.0]
+# see config file settings.cfg and srsim module srsim_config.py
 
 #############################################################################
 #! GUI elements
@@ -66,14 +68,28 @@ class ControlPanel(HasTraits):
     button_start_stop_simulation = Button("Start/Stop simulation")
     # Range of simulation area (length * width * height), unit: meter
     area_length, area_width, area_height = Float, Float, Float
+    # bool switch, to enable/disable area size changing
+    area_size_allow_change = Bool
     # simulation step count
     text_sim_step_count = Int
-    #sim_thread_test = Instance(SimulationThread)
-    #text_sim_step_count = DelegatesTo("sim_thread_test", prefix="step_count")
+
     # ---- Wind tab ----
-    enum_wind_field_model = Enum('uniform', 'external')
+    # Wind = Advective flow + Turbulent flow
+    # (1) Advective flow
+    # Selection of advective flow model
+    enum_advection_model = Enum('uniform','irrotational','ext')
+    # Advection Model 1: uniform advective flow field
+    uniform_advection_vector_x, uniform_advection_vector_y, \
+            uniform_advection_vector_z = Float, Float, Float
+    # Advection Model 2: irrotational, imcompressible flow
+    irrotational_advection_mean_x, irrotational_advection_mean_y, \
+            irrotational_advection_mean_z = Float, Float, Float
+    # Advection Model 3: load external advection field data
+
     # ---- Plume tab ----
     enum_plume_model = Enum('farrell', 'other')
+    init_odor_source_pos_x, init_odor_source_pos_y,\
+            init_odor_source_pos_z = Float, Float, Float
     # simulator running state display
     textbox_sim_state_display = String()
 
@@ -82,10 +98,16 @@ class ControlPanel(HasTraits):
     # Data can be updated from outside
     # ---- simulation field grid, which is Tuple of x, y, z arrays
     grid = Tuple(Array, Array, Array)
-    # ---- wind vector field
-    data_wind_field = Tuple(Array, Array, Array)
+    # ---- advective flow vector field
+    data_advection_field = Tuple(Array, Array, Array)
+    # ---- mean wind flow vector instantaneously
+    mean_wind_vector = Tuple(Float, Float, Float)
     # ---- plume scalar field
-    #data_odor_field = Tuple(Array)
+    data_odor_field = Array
+    # ---- masked odor field grid, for quick display
+    grid_odor_masked = Array
+    # ---- odor source position tuple
+    odor_source_pos = Tuple(Float, Float, Float)
 
     ###################################
     # ======== Events ========
@@ -95,6 +117,7 @@ class ControlPanel(HasTraits):
     ###################################
     # ======== Streamlines ========
     wind_field = Instance(HasTraits)
+    odor_field = Instance(HasTraits)
 
     ###################################
     # ======== Other ========
@@ -107,6 +130,7 @@ class ControlPanel(HasTraits):
     # view
     view = View(VSplit(
             Group(
+                # Control tab
                 Group(
                     Group(
                         Item('area_length',
@@ -127,7 +151,8 @@ class ControlPanel(HasTraits):
                                                     format = '%.1f',
                                                     mode = 'slider'),
                             label = 'H (meters)'),
-                        label = 'Area Size L/W/H', show_border=True),
+                        label = 'Area Size L/W/H', show_border=True,
+                        enabled_when = "area_size_allow_change == True"),
                     Group(
                         Item('text_sim_step_count',
                             editor = TextEditor(    auto_set = False,
@@ -136,19 +161,86 @@ class ControlPanel(HasTraits):
                         label = 'Simulation Step count', show_border=True),
                     Item('button_start_stop_simulation', show_label = False),
                     label = 'Control', dock = 'tab'),
+                # Wind tab
                 Group(
-                    Item(name = 'enum_wind_field_model',
+                    Item(name = 'enum_advection_model',
                         editor = EnumEditor(values = {
-                            'uniform'  : '1:Uniform wind field',
-                            'external' : '2:Load External wind field data',}),
-                        style = 'custom'),
+                            'uniform'       : '1:uniform',
+                            'irrotational'  : '2:irrotational & imcompressible',
+                            'ext'           : '3:load external data',}),
+                        label = 'Advection',
+                        style = 'simple'),
+                    Group(
+                        Item('uniform_advection_vector_x',
+                            editor = RangeEditor(   low = '-10.0',
+                                                    high = '10.0',
+                                                    format = '%.1f',
+                                                    mode = 'slider'),
+                            label = 'x (m/s):',),
+                        Item('uniform_advection_vector_y',
+                            editor = RangeEditor(   low = '-10.0',
+                                                    high = '10.0',
+                                                    format = '%.1f',
+                                                    mode = 'slider'),
+                            label = 'y (m/s):',),
+                        Item('uniform_advection_vector_z',
+                            editor = RangeEditor(   low = '-10.0',
+                                                    high = '10.0',
+                                                    format = '%.1f',
+                                                    mode = 'slider'),
+                            label = 'z (m/s):',),
+                        label = 'Uniform advection vector', show_border=True,
+                        visible_when = "enum_advection_model == 'uniform'"),
+                    Group(
+                        Item('irrotational_advection_mean_x',
+                            editor = RangeEditor(   low = '-10.0',
+                                                    high = '10.0',
+                                                    format = '%.1f',
+                                                    mode = 'slider'),
+                            label = 'x (m/s):',),
+                        Item('irrotational_advection_mean_y',
+                            editor = RangeEditor(   low = '-10.0',
+                                                    high = '10.0',
+                                                    format = '%.1f',
+                                                    mode = 'slider'),
+                            label = 'y (m/s):',),
+                        Item('irrotational_advection_mean_z',
+                            editor = RangeEditor(   low = '-10.0',
+                                                    high = '10.0',
+                                                    format = '%.1f',
+                                                    mode = 'slider'),
+                            label = 'z (m/s):',),
+                        label = 'Mean wind vector', show_border=True,
+                        visible_when = "enum_advection_model == 'irrotational'"),
                     label = 'Wind', dock = 'tab'),
+                # Plume tab
                 Group(
                     Item(name = 'enum_plume_model',
                         editor = EnumEditor(values = {
                             'farrell'  : '1:Farrell plume model',
                             'other'    : '2:Other plume model...',}),
                         style = 'custom'),
+                    Group(
+                        Item('init_odor_source_pos_x',
+                            editor = RangeEditor(   low = '0.0',
+                                                    high_name = 'area_length',
+                                                    format = '%.1f',
+                                                    mode = 'auto'),
+                            label = 'x (m):',),
+                        Item('init_odor_source_pos_y',
+                            editor = RangeEditor(   low = '0.0',
+                                                    high_name = 'area_width',
+                                                    format = '%.1f',
+                                                    mode = 'auto'),
+                            label = 'y (m):',),
+                        Item('init_odor_source_pos_z',
+                            editor = RangeEditor(   low = '0.0',
+                                                    high_name = 'area_height',
+                                                    format = '%.1f',
+                                                    mode = 'auto'),
+                            label = 'z (m):',),
+                        label = 'Init odor source position (x,y,z) (m)', show_border=True,
+                        enabled_when = "area_size_allow_change == True"),
                     label = 'Plume', dock = 'tab'),
                 layout = 'tabbed'),
             Item(name = 'textbox_sim_state_display',
@@ -164,24 +256,65 @@ class ControlPanel(HasTraits):
 
     # Area size default: 10.0x10.0x10.0m
     def _area_length_default(self):
-        area_length = default_area_size[0]
-        return area_length
+        size = Config.get_sim_area_size()
+        return size[0]
     def _area_width_default(self):
-        area_width = default_area_size[1]
-        return area_width
+        size = Config.get_sim_area_size()
+        return size[1]
     def _area_height_default(self):
-        area_height = default_area_size[2]
-        return area_height
+        size = Config.get_sim_area_size()
+        return size[2]
+
+    def _area_size_allow_change_default(self):
+        return True
+
+    def _enum_advection_model_default(self):
+        model = Config.get_wind_model()
+        return model
+
+    def _uniform_advection_vector_x_default(self):
+        return self.mean_wind_vector[0]
+    def _uniform_advection_vector_y_default(self):
+        return self.mean_wind_vector[1]
+    def _uniform_advection_vector_z_default(self):
+        return self.mean_wind_vector[2]
+
+    def _irrotational_advection_mean_x_default(self):
+        return self.mean_wind_vector[0]
+    def _irrotational_advection_mean_y_default(self):
+        return self.mean_wind_vector[1]
+    def _irrotational_advection_mean_z_default(self):
+        return self.mean_wind_vector[2]
+
+    def _init_odor_source_pos_x_default(self):
+        pos = Config.get_odor_source_pos()
+        return pos[0]
+    def _init_odor_source_pos_y_default(self):
+        pos = Config.get_odor_source_pos()
+        return pos[1]
+    def _init_odor_source_pos_z_default(self):
+        pos = Config.get_odor_source_pos()
+        return pos[2]
+
 
     def _grid_default(self):
-        x, y, z = np.mgrid[0:default_area_size[0]:0.1, 0:default_area_size[1]:0.1,
-                0:default_area_size[2]:0.1]
+        gsize = Config.get_wind_grid_size()
+        x, y, z = np.mgrid[0:self.area_length:gsize, 0:self.area_width:gsize,
+                0:self.area_height:gsize]
         return x, y, z
 
-    def _data_wind_field_default(self):
-        u, v, w = np.mgrid[0:default_area_size[0]:0.1, 0:default_area_size[1]:0.1,
-                0:default_area_size[2]:0.1]
+    def _data_advection_field_default(self):
+        u, v, w = srsim_wind_uniform_tinv_get_uvw(self.grid, self.mean_wind_vector)
         return u, v, w
+
+    def _mean_wind_vector_default(self):
+        vector = Config.get_mean_wind_vector()
+        return vector[0], vector[1], vector[2]
+
+    def _data_odor_field_default(self):
+        x, y, z = self.grid
+        o = np.ones_like(x)
+        return o
 
     def _text_sim_step_count_default(self):
         c = 0
@@ -189,89 +322,142 @@ class ControlPanel(HasTraits):
 
     def _wind_field_default(self):
         x, y, z = self.grid
-        u, v, w = self.data_wind_field
-        # init plotting
-        self.scene.disable_render = True
-        #wind_field = self.scene.mlab.quiver3d(x,y,z,u,v,w)
-        wind_field = self.scene.mlab.pipeline.vector_field(x, y, z, u, v, w)
-        vectors_wind = self.scene.mlab.pipeline.vectors(
-                wind_field, mode = 'arrow',
-                mask_points=8000, colormap='YlOrRd')
-        self.scene.disable_render = False
-
+        u, v, w = self.data_advection_field
+        wind_field = self.scene.mlab.quiver3d(x, y, z, u, v, w)
         return wind_field
 
-
+    def _odor_field_default(self):
+        x = self.init_odor_source_pos_x
+        y = self.init_odor_source_pos_y
+        z = self.init_odor_source_pos_z
+        o = [1.0]
+        odor_field = self.scene.mlab.points3d(x, y, z, o, colormap = "cool",
+                opacity = 0.3, transparent = True, scale_factor=1.0)
+        return odor_field
 
     ###################################
     # ======== Listening ========
-    @on_trait_change('scene.activated')#, area_length, area_width, area_height')
+    @on_trait_change('scene.activated')
     def init_scene(self):
-        x, y, z = self.grid
-        u, v, w = self.data_wind_field
-        # This line is to init 'wind_field'
+        # init scene
+        u, v, w = self.data_advection_field
         self.wind_field.mlab_source.set(u=u, v=v, w=w)
         # axes and outlines
-        self.scene.mlab.axes( xlabel = 'X East (m)', ylabel = 'Y North (m)',
-                zlabel = 'Z Up (m)', ranges = [0, self.area_length, 0,
-                    self.area_width, 0, self.area_height],)
-        self.scene.mlab.outline(extent=[0, self.area_length, 0,
-            self.area_width, 0, self.area_height],)
+        self.func_init_axes_outline()
+        # compute odor field(init)
+        #self.func_odor_field_init()
+        o_m = [1.0]
+        self.odor_field.mlab_source.set(s=o_m)
 
     @on_trait_change('area_length, area_width, area_height')
     def change_area_size(self):
-        '''
-        x, y, z = np.mgrid[0:self.area_length:0.1, 0:self.area_width:0.1,
-                0:self.area_height:0.1]
-        u, v, w = np.mgrid[0:self.area_length:0.1, 0:self.area_width:0.1,
-                0:self.area_height:0.1]
+        # change mesh grid to new shape
+        gsize = Config.get_wind_grid_size()
+        x, y, z = np.mgrid[0:self.area_length:gsize, 0:self.area_width:gsize,
+                0:self.area_height:gsize]
         self.grid = x, y, z
-        self.data_wind_field = u, v, w
-        # init plotting
-        self.scene.disable_render = True
-        #wind_field = self.scene.mlab.quiver3d(x,y,z,u,v,w)
-        wind_field = self.scene.mlab.pipeline.vector_field(x, y, z, u, v, w)
-        vectors_wind = self.scene.mlab.pipeline.vectors(
-                wind_field, mode = 'arrow',
-                mask_points=8000, colormap='YlOrRd')
-        self.scene.disable_render = False
-        '''
-        x, y, z = self.grid
-        u, v, w = srsim_wind_uniform_tinv_get_uvw(x, y, z, [1,2,3])
-        self.scene.disable_render = True
-        self.wind_field.mlab_source.set(u=u, v=v, w=w)
-        self.scene.disable_render = False
 
+        # re-init plotting
+        # speed up plotting
+        self.scene.disable_render = True
+        # clean figure
+        self.scene.mlab.clf()
+        # draw wind vector field
+        u, v, w = srsim_wind_uniform_tinv_get_uvw(self.grid, self.mean_wind_vector)
+        self.wind_field = self.scene.mlab.quiver3d(x, y, z, u, v ,w)
+        # draw axes & outline
+        self.func_init_axes_outline()
+        self.scene.disable_render = False
+        # save area setting to global settings
+        Config.set_sim_area_size([self.area_length, self.area_width, self.area_height])
+
+    @on_trait_change('enum_advection_model')
+    def change_advection_model_selection(self):
+        # save selection to global settings
+        Config.set_wind_model(self.enum_advection_model)
+
+    @on_trait_change('uniform_advection_vector_x, uniform_advection_vector_y, uniform_advection_vector_z')
+    def change_uniform_advection_vector(self):
+        self.mean_wind_vector = self.uniform_advection_vector_x,\
+                self.uniform_advection_vector_y, self.uniform_advection_vector_z
+        u, v, w = srsim_wind_uniform_tinv_get_uvw(self.grid, self.mean_wind_vector)
+        self.wind_field.mlab_source.set(u=u, v=v, w=w)
+        #save mean wind vector setting to global settings
+        Config.set_mean_wind_vector([self.uniform_advection_vector_x,\
+                self.uniform_advection_vector_y, self.uniform_advection_vector_z])
+
+    @on_trait_change('irrotational_advection_mean_x, irrotational_advection_mean_y, irrotational_advection_mean_z')
+    def change_irrotaional_adv_mean_vector(self):
+        self.mean_wind_vector = self.irrotational_advection_mean_x,\
+                self.irrotational_advection_mean_y, self.irrotational_advection_mean_z
+        #save mean wind vector setting to global settings
+        Config.set_mean_wind_vector([self.irrotational_advection_mean_x,\
+                self.irrotational_advection_mean_y, self.irrotational_advection_mean_z])
+
+    @on_trait_change('init_odor_source_pos_x, init_odor_source_pos_y, init_odor_source_pos_z')
+    def change_init_odor_source_pos(self):
+        # change odor source position
+        x, y, z = self.init_odor_source_pos_x,\
+                self.init_odor_source_pos_y, self.init_odor_source_pos_z
+        o = [1.0]
+        self.odor_field.mlab_source.set(x=x, y=y, z=z)
+        # remove previous drawing of odor source
+        #self.odor_field.remove()
+        # re-draw odor source
+        #self.odor_field = self.scene.mlab.points3d(x, y, z, o, colormap = "cool",
+        #        opacity = 0.3, transparent = True, scale_factor=1.0)
+        # save pos setting to global settings
+        Config.set_odor_source_pos([self.init_odor_source_pos_x,\
+                self.init_odor_source_pos_y, self.init_odor_source_pos_z])
 
 
     def _button_start_stop_simulation_fired(self):
         ''' Callback of the "start/stop simulation" button, this starts
             the simulation thread, or kills it
         '''
+
         if self.sim_thread and self.sim_thread.isAlive():
             # kill simulation thread if it's running
             self.sim_thread.wants_abort = True
+            # enable area size changing item (GUI)
+            self.area_size_allow_change = True
         else:
+            # disable area size changing item (GUI)
+            self.area_size_allow_change = False
             # print simulator settings
             temp_str = 'Sim Area (L*W*H): %.1f m * %.1f m * %.1f m\n\
-                    Grid size: 0.1 m' %(self.area_length, self.area_width,
-                            self.area_height)
+                    Grid size: %.1f m' %(self.area_length, self.area_width,
+                            self.area_height, Config.get_wind_grid_size())
             self.add_text_line('====== Settings ======' + '\n' +
                     temp_str + '\n' + '====== Simulation started ======')
             # create & start simulation thread
             self.sim_thread = SimulationThread()
+            # sim visual update function
             self.sim_thread.update_scene = self.func_event_update_scene
+            # sim step count function
             self.sim_thread.count_sim_step = self.func_sim_step_count
+            # sim textbox state display function
             self.sim_thread.display = self.add_text_line
+            # copy self.grid
             self.sim_thread.grid = self.grid
-            self.sim_thread.data_wind_field = self.data_wind_field
+            # copy local data_wind_field to sim_thead.data_wind_field
+            self.sim_thread.data_advection_field = self.data_advection_field
+            # send wind model selection to sim_thread
+            self.sim_thread.wind_model = self.wind_model
+            # send odor source pos to sim_thread
+            self.odor_source_pos = self.init_odor_source_pos_x,\
+                self.init_odor_source_pos_y, self.init_odor_source_pos_z
+            self.sim_thread.odor_source_pos = self.odor_source_pos
             self.sim_thread.start()
 
-
     def _event_need_update_scene_fired(self):
-        wind_u, wind_v, wind_w = self.data_wind_field
         self.scene.disable_render = True
-        self.wind_field.mlab_source.set(u=wind_u, v=wind_v, w=wind_w)
+        # update wind field
+        # Notice: sim_thread.data_wind_field changed, while
+        #         self.data_wind_field still remain init state
+        #u_m, v_m, w_m = self.func_slice_mesh_matrix_3d(
+        #        self.sim_thread.data_wind_field, default_draw_wind_mask_interval)
+        #self.wind_field.mlab_source.set(u=u_m, v=v_m, w=w_m)
         self.scene.disable_render = False
 
 
@@ -291,49 +477,42 @@ class ControlPanel(HasTraits):
     def func_sim_step_count(self):
         self.text_sim_step_count += 1
 
-    def func_init_sim_scene(self):
-        # clean figure
-        self.scene.mlab.clf()
-        # speed up plotting
-        self.scene.disable_render = True
-        # init simulation
-        x, y, z = self.grid
-        #wind_u, wind_v, wind_w = self.data_wind_field
-        wind_u, wind_v, wind_w = srsim_wind_uniform_tinv_get_uvw(x, y, z, [1,2,3])
-        # init plotting
-        self.wind_field = self.scene.mlab.quiver3d(x, y,
-                z, wind_u, wind_v, wind_w)
-        '''
-        self.wind_field = self.scene.mlab.pipeline.vector_field(x=x, y=y,
-                z=z, u=wind_u, v=wind_v, w=wind_w)
-        '''
-        '''
-        vectors_wind = self.scene.mlab.pipeline.vectors(
-                self.wind_field, mode = 'arrow', resolution = 10,
-                mask_points=100, colormap='YlOrRd', scale_factor=3.)
-        '''
-        '''
-        vectors_wind = self.scene.mlab.pipeline.vectors(
-                self.wind_field, mode = 'arrow',
-                mask_points=100, colormap='YlOrRd', scale_factor=3.)
-        vectors_wind.glyph.mask_points.random_mode = False
-        '''
-        # axes and outlines
-        '''
+    # draw axes & outlines on current scene
+    def func_init_axes_outline(self):
         self.scene.mlab.axes( xlabel = 'X East (m)', ylabel = 'Y North (m)',
                 zlabel = 'Z Up (m)', ranges = [0, self.area_length, 0,
                     self.area_width, 0, self.area_height],)
-        '''
-        '''
         self.scene.mlab.outline(extent=[0, self.area_length, 0,
             self.area_width, 0, self.area_height],)
-        '''
-        self.scene.mlab.axes()
-        self.scene.mlab.outline()
-        # camera angle
-        self.scene.mlab.view(azimuth = 90, elevation = 60)
-        # speed up plotting
-        self.scene.disable_render = False
+
+    # slice 3d mesh matrix to smaller matrix for quick display
+    '''
+    input:
+        interval ---- slice interval, must be even number
+                        interval/2:len(xyz_grids):interval
+    '''
+    def func_slice_mesh_matrix_3d(self, mesh_grid, interval):
+        x, y, z = mesh_grid
+        x_s = x[interval/2:x.shape[0]:interval,
+                interval/2:x.shape[1]:interval, interval/2:x.shape[2]:interval]
+        y_s = y[interval/2:y.shape[0]:interval,
+                interval/2:y.shape[1]:interval, interval/2:y.shape[2]:interval]
+        z_s = z[interval/2:z.shape[0]:interval,
+                interval/2:z.shape[1]:interval, interval/2:z.shape[2]:interval]
+        return x_s, y_s, z_s
+
+    # slice 3d mesh matrix to x/y/z array, reverse process of mgrid
+    def func_slice_mesh_matrix2array(self, mesh_grid, interval):
+        x, y, z = mesh_grid
+        x_s = x[interval/2:x.shape[0]:interval, 0, 0]
+        y_s = y[0, interval/2:y.shape[1]:interval, 0]
+        z_s = z[0, 0, interval/2:z.shape[2]:interval]
+        return x_s, y_s, z_s
+
+    # init odor (concentration) field
+    def func_odor_field_init(self):
+        self.data_odor_field = srsim_plume(self.enum_plume_model, self.grid,
+                self.data_wind_field)
 
 class MainWindowHandler(Handler):
     def close(self, info, is_OK):
@@ -343,6 +522,8 @@ class MainWindowHandler(Handler):
             info.object.panel.sim_thread.wants_abort = True
             while info.object.panel.sim_thread.isAlive():
                 sleep(0.1)
+        # save settings to file settings.cfg`
+        Config.save_settings()
         return True
 
 # MainWindow class, srsim UI
@@ -362,6 +543,8 @@ class MainWindow(HasTraits):
     ##################################
     # Private interface
     def _panel_default(self):
+        # load settings from file settings.cfg
+        Config.load_settings()
         # pass self.scene to control panel
         return ControlPanel(scene = self.scene)
 
