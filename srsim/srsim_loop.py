@@ -28,8 +28,6 @@ Documentation and tests are included in ...
 
 from threading import Thread
 from time import sleep
-from srsim_wind_model import srsim_wind_simulator
-#from srsim_plume_model import srsim_plume_simulator
 from pyface.api import GUI
 
 class SimulationThread(Thread):
@@ -38,22 +36,38 @@ class SimulationThread(Thread):
     # flag indicating whether to abort sim
     wants_abort = False
 
+    # params converted from outside
+    grid = None
+    wind_model = None
+    count_sime_step = None
+    update_scene = None
+    display = None
+    wind = None
+
+    # data for outside display
+    wind_vector_field = None
+
     def run(self):
         ''' Runs the simulation loop
         '''
 
         # Reset simulation step
         sim_step = 0
+        # init simulation
+        ''' Init wind field '''
+        self.wind.wind_init(self.wind_model)
         while not self.wants_abort:
             sim_step += 1
             ''' Update wind field '''
+            if self.wind_model != 'uniform':
+                self.wind.wind_update()
+                # copy wind result to local
+                self.wind_vector_field = self.wind.wind_vector_field
             ''' Update pollutant diffusion '''
             ''' Update robot position '''
             # retrieve mesh grid
             x, y, z = self.grid
             # compute wind field
-            if (self.wind_model != 'const'):# prevent useless computing
-                self.data_wind_field = srsim_wind_simulator(self.wind_model, self.grid, [1,2,3], 0)
             # compute odor field
             #srsim_plume_simulator('farrell', self.grid, self.data_wind_field, self.odor_source_pos, self.sim_step)
             # update sim count & sim scene visualization
