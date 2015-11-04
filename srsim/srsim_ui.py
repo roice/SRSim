@@ -72,6 +72,8 @@ class ControlPanel(HasTraits):
     area_length, area_width, area_height = Float, Float, Float
     # simulation step count
     text_sim_step_count = Int
+    # button for camera info saving
+    button_save_camera_angle = Button("Save camera angle")
 
     # ---- Wind tab ----
     # Wind = Advective flow + Turbulent flow
@@ -84,6 +86,8 @@ class ControlPanel(HasTraits):
     # Advection Model 2: irrotational, incompressible flow
     irrotational_advection_mean_x, irrotational_advection_mean_y, \
             irrotational_advection_mean_z = Float, Float, Float
+    wind_colored_noise_g, wind_colored_noise_xi, wind_colored_noise_omega = \
+            Float, Float, Float
     # Advection Model 3: load external advection field data
 
     # ---- Plume tab ----
@@ -153,6 +157,9 @@ class ControlPanel(HasTraits):
                         label = 'Area Size L/W/H', show_border=True,
                         enabled_when = "params_allow_change == True"),
                     Group(
+                        Item('button_save_camera_angle', show_label = False),
+                        label = 'Camera view', show_border = True),
+                    Group(
                         Item('text_sim_step_count',
                             editor = TextEditor(    auto_set = False,
                                                     enter_set = False),
@@ -211,6 +218,27 @@ class ControlPanel(HasTraits):
                             label = 'z (m/s):',),
                         label = 'Mean wind vector', show_border=True,
                         visible_when = "enum_advection_model == 'irrotational'"),
+                    Group(
+                        Item('wind_colored_noise_g',
+                            editor = RangeEditor(   low = '0.0',
+                                                    high = '10.0',
+                                                    format = '%.1f',
+                                                    mode = 'slider'),
+                            label = 'G',),
+                        Item('wind_colored_noise_xi',
+                            editor = RangeEditor(   low = '0.0',
+                                                    high = '2.0',
+                                                    format = '%.01f',
+                                                    mode = 'slider'),
+                            label = 'Damping',),
+                        Item('wind_colored_noise_omega',
+                            editor = RangeEditor(   low = '0.0',
+                                                    high = '2.0',
+                                                    format = '%.01f',
+                                                    mode = 'slider'),
+                            label = 'Bandwidth',),
+                    label = 'Stochastic (colored noise) params', show_border=True,
+                    visible_when = "enum_advection_model == 'irrotational'"),
                     label = 'Wind', dock = 'tab',
                     enabled_when = "params_allow_change == True"),
                 # Plume tab
@@ -286,6 +314,17 @@ class ControlPanel(HasTraits):
     def _irrotational_advection_mean_z_default(self):
         return self.mean_wind_vector[2]
 
+    def _wind_colored_noise_g_default(self):
+        noise_params = Config.get_wind_colored_noise_params()
+        return noise_params[0]
+    def _wind_colored_noise_xi_default(self):
+        noise_params = Config.get_wind_colored_noise_params()
+        return noise_params[1]
+    def _wind_colored_noise_omega_default(self):
+        noise_params = Config.get_wind_colored_noise_params()
+        return noise_params[2]
+
+
     def _init_odor_source_pos_x_default(self):
         pos = Config.get_odor_source_pos()
         return pos[0]
@@ -335,6 +374,10 @@ class ControlPanel(HasTraits):
         gsize = Config.get_wind_grid_size()
         self.wind.gsize = gsize
         self.wind.mean_flow = list(self.mean_wind_vector)
+        cn_p = Config.get_wind_colored_noise_params()
+        self.wind.G = cn_p[0]
+        self.wind.wind_damping = cn_p[1]
+        self.wind.wind_bandwidth = cn_p[2]
         # init scene
         self.wind.uniform_tinv()
         u, v, w = self.wind.wind_vector_field
@@ -342,6 +385,8 @@ class ControlPanel(HasTraits):
         self.wind_field = self.scene.mlab.quiver3d(x, y, z, u, v, w)
         # axes and outlines
         self.func_init_axes_outline()
+        # camera view
+        self.scene.mlab.view(*Config.get_camera_view())
         # compute odor field(init)
         #self.func_odor_field_init()
         o_m = [1.0]
@@ -396,6 +441,15 @@ class ControlPanel(HasTraits):
         # save selection to global settings
         Config.set_wind_model(self.enum_advection_model)
 
+    @on_trait_change('wind_colored_noise_g, wind_colored_noise_xi, wind_colored_noise_omega')
+    def change_wind_colored_noise_params(self):
+        self.wind.G = self.wind_colored_noise_g
+        self.wind.wind_damping = self.wind_colored_noise_xi
+        self.wind_wind_bandwidth = self.wind_colored_noise_omega
+        # save wind colored noise params to global settings
+        Config.set_wind_colored_noise_params([self.wind_colored_noise_g, \
+                self.wind_colored_noise_xi, self.wind_colored_noise_omega])
+
     @on_trait_change('init_odor_source_pos_x, init_odor_source_pos_y, init_odor_source_pos_z')
     def change_init_odor_source_pos(self):
         # change odor source position
@@ -427,11 +481,18 @@ class ControlPanel(HasTraits):
             # disable area size changing item (GUI)
             self.params_allow_change = False
             # print simulator settings
-            temp_str = 'Sim Area (L*W*H): %.1f m * %.1f m * %.1f m\n\
+            sim_area_str = 'Sim Area (L*W*H): %.1f m * %.1f m * %.1f m\n\
                     Grid size: %.1f m' %(self.area_length, self.area_width,
                             self.area_height, Config.get_wind_grid_size())
+            sim_wind_str = 'Wind type: ' + str(self.enum_advection_model) + '\n' \
+                    + '  Mean wind vector = ' + str(self.mean_wind_vector)
+            if self.enum_advection_model == 'irrotational':
+                sim_wind_str += '\n' + '  Colored noise Params: ' + '\n' \
+                        + '    G = ' + str(self.wind.G) + '\n' \
+                        + '    wind_damping = ' + str(self.wind.wind_damping) + '\n' \
+                        + '    wind_bandwidth = ' + str(self.wind.wind_bandwidth)
             self.add_text_line('====== Settings ======' + '\n' +
-                    temp_str + '\n' + '====== Simulation started ======')
+                    sim_area_str + '\n' + sim_wind_str + '\n' + '====== Simulation started ======')
             # create & start simulation thread
             self.sim_thread = SimulationThread()
             # sim visual update function
@@ -463,7 +524,9 @@ class ControlPanel(HasTraits):
         self.wind_field.mlab_source.set(u=u, v=v, w=w)
         self.scene.disable_render = False
 
-
+    def _button_save_camera_angle_fired(self):
+        cam = self.scene.mlab.view()
+        Config.set_camera_view(cam)
 
     ###################################
     # Private functions

@@ -28,6 +28,7 @@ Documentation and tests are included in ...
 
 import ConfigParser
 import sys, os
+import numpy as np
 
 class Settings:
     # [setup]
@@ -42,7 +43,12 @@ class Settings:
     # grid size of advective flow field simulation (meter)
     wind_grid_size = 'None'
     # mean advection vector
-    wind_mean_vector = 'None'
+    mean_wind_vector = 'None'
+    # colored noise params
+    wind_colored_noise_params = 'None'
+
+    # [camera]
+    camera_view = 'None'
 
 
 def set_sim_area_size(size):
@@ -70,6 +76,20 @@ def set_mean_wind_vector(vector):
 def get_mean_wind_vector():
     return eval(Settings.mean_wind_vector)
 
+def set_wind_colored_noise_params(params):
+    Settings.wind_colored_noise_params = str(params)
+def get_wind_colored_noise_params():
+    return eval(Settings.wind_colored_noise_params)
+
+# camera view is tuple type: [float,float,float,array[float,float,float]]
+def set_camera_view(cam):
+    cam_list = [ cam[0], cam[1], cam[2], list(cam[3]) ]
+    Settings.camera_view = str(cam_list)
+def get_camera_view():
+    cam_list = eval(Settings.camera_view)
+    cam = tuple([ cam_list[0], cam_list[1], cam_list[2], np.array(cam_list[3]) ])
+    return cam
+
 def load_settings():
     # get abs path of this script
     path = sys.path[0]
@@ -84,6 +104,8 @@ def load_settings():
     Settings.wind_model = cp.get('wind', 'wind_model')
     Settings.wind_grid_size = cp.getfloat('wind', 'wind_grid_size')
     Settings.mean_wind_vector = cp.get('wind', 'mean_wind_vector')
+    Settings.wind_colored_noise_params = cp.get('wind', 'colored_noise_params')
+    Settings.camera_view = cp.get('camera', 'camera_view')
 
 def save_settings():
     # get abs path of this script
@@ -99,5 +121,7 @@ def save_settings():
     cp.set('wind', 'wind_model', Settings.wind_model)
     cp.set('wind', 'wind_grid_size', str(Settings.wind_grid_size))
     cp.set('wind', 'mean_wind_vector', Settings.mean_wind_vector)
+    cp.set('wind', 'colored_noise_params', Settings.wind_colored_noise_params)
+    cp.set('camera', 'camera_view', Settings.camera_view)
     cp.write(open(cfgfile_path, 'w'))
 
