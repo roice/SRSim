@@ -31,9 +31,9 @@ import numpy as np
 from traits.api import HasTraits, Array, Instance, Button, Enum, String,\
         Range, Array, Tuple, Int, Float, Event, on_trait_change, Bool, List,\
         Str
-from traitsui.api import View, Item, Group, HSplit, VSplit,\
+from traitsui.api import View, Item, Group, HGroup, HSplit, VSplit,\
         ButtonEditor, TextEditor, EnumEditor, RangeEditor, Handler,\
-        CheckListEditor
+        CheckListEditor, BooleanEditor
 from mayavi import mlab
 from mayavi.core.ui.api import MlabSceneModel, SceneEditor, MayaviScene
 # Thread related imports
@@ -75,6 +75,8 @@ class ControlPanel(HasTraits):
     area_length, area_width, area_height = Int, Int, Int
     # sim time interval
     sim_dt = Float
+    # sim scene display switch
+    sim_scene_switch = Bool
     # simulation step count
     text_sim_step_count = Int
     # button for camera info saving
@@ -164,16 +166,22 @@ class ControlPanel(HasTraits):
                                                 format = '%.2f',
                                                 mode = 'slider'),
                         label = 'delta t (second)'),
-                    Group(
-                        Item('button_save_camera_angle', show_label = False),
-                        label = 'Camera view', show_border = True),
+                    HGroup(
+                        Item('button_save_camera_angle', \
+                                show_label = False),
+                        Item('sim_scene_switch',
+                        editor = BooleanEditor( mapping={
+                                                    "on":True,
+                                                    "off":False}),
+                        label = 'Scene switch',)),
+                    Item('button_start_stop_simulation', \
+                                show_label = False),
                     Group(
                         Item('text_sim_step_count',
                             editor = TextEditor(    auto_set = False,
                                                     enter_set = False),
                             label = 'Step', style = 'readonly'),
                         label = 'Simulation Step count', show_border=True),
-                    Item('button_start_stop_simulation', show_label = False),
                     label = 'Control', dock = 'tab'),
                 # Wind tab
                 Group(
@@ -325,6 +333,9 @@ class ControlPanel(HasTraits):
     def _sim_dt_default(self):
         return Config.get_dt()
 
+    def _sim_scene_switch_default(self):
+        return True
+
     def _params_allow_change_default(self):
         return True
 
@@ -398,6 +409,7 @@ class ControlPanel(HasTraits):
     # ======== Listening ========
     @on_trait_change('scene.activated')
     def init_scene(self):
+        print 'scece switch = '+str(self.sim_scene_switch)
         # init params of wind model
         l, w, h = np.array(self.grid).shape[1:4] # 1 2 3
         self.wind.xyz_n = [l, w, h]
@@ -561,16 +573,18 @@ class ControlPanel(HasTraits):
                 self.sim_thread.plume.fila_growth_rate = self.fila_growth_rate
                 self.sim_thread.plume.fila_number_per_sec = self.fila_release_per_sec
                 self.odor_field = self.scene.mlab.points3d([0.0], [0.0], [0.0], [0.0], \
-                        scale_factor=1, reset_zoom=False)
+                        color = (0,0,0), scale_factor=1, reset_zoom=False)
             else:
                 exit('Error: Other plume model not supported yet...')
             # send odor source pos to sim_thread
             self.sim_thread.start()
 
     def _event_need_update_scene_fired(self):
-        self.scene.disable_render = True
-        self.func_update_scene()
-        self.scene.disable_render = False
+        # if scene switch is turned on (default)
+        if self.sim_scene_switch == True:
+            self.scene.disable_render = True
+            self.func_update_scene()
+            self.scene.disable_render = False
 
     def _button_save_camera_angle_fired(self):
         cam = self.scene.mlab.view()
@@ -607,8 +621,7 @@ class ControlPanel(HasTraits):
         # update odor field display
         fila = self.sim_thread.plume.fila_snapshot
         # update obj
-        self.odor_field.mlab_source.reset(x=fila['x'], y=fila['y'], z=fila['z'], scalars=fila['r']*50, \
-                color = (0,0,0), scale_factor=1, reset_zoom=False)
+        self.odor_field.mlab_source.reset(x=fila['x'], y=fila['y'], z=fila['z'], scalars=fila['r']*50)
         self.odor_field.mlab_source.set(x=fila['x']) # to trig display refresh
 
     # slice 3d mesh matrix to smaller matrix for quick display
