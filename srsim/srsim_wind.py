@@ -31,7 +31,6 @@ from fipy import Grid3D, CellVariable, DiffusionTerm
 from scipy.interpolate import griddata
 #for debug
 from mayavi import mlab
-from mayavi.core.ui.api import MlabSceneModel
 
 class Advection():
     # === Params configured from outside ===
@@ -61,6 +60,7 @@ class Advection():
 
     # === Results ===
     wind_vector_field = None
+    wind_at_vertex = None # wind vector at 8 vertexes, also the BCs, for interp
 
     # imcompressible, inviscid, irrotational, rectangular sim area
     # step 1 & step 2: Mesh & Equation
@@ -73,6 +73,8 @@ class Advection():
         self.phi = CellVariable(mesh=self.mesh, name='potential phi', value=0.)
         self.eqn = (DiffusionTerm(coeff = 1.) == 0.)
         #print 'ic&iv&ir flow initiated'
+        # clear colored noise static parameters
+        self.vertexWindVecRanInc = [ [ [0 for i in range(2)] for i in range(3)] for i in range(8)]
 
     # step 3 & step 4: BCs & Solve
     # positions of 8 vertexes:
@@ -95,6 +97,8 @@ class Advection():
             for j in range(3): # 3 components
                 vertexWindVec[i, j] = self.mean_flow[j] \
                         + self.colored_noise(self.vertexWindVecRanInc[i][j])
+        # save these 8 vector for interp wind of edge area for plume sim
+        self.wind_at_vertex = vertexWindVec
         #print 'vertexWindVec = ' + str(vertexWindVec)
         # interpolate flow vector on sim area faces, and set neumann boundary
         #   conditions, because /grad /phi = V(x,y,z)

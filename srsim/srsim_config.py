@@ -36,16 +36,21 @@ class Settings:
     sim_area_size = 'None'
     # odor source position
     odor_source_pos = 'None'
+    # sim time interval
+    dt = 'None'
 
     # [wind]
     # wind model
     wind_model = 'None'
-    # grid size of advective flow field simulation (meter)
+    # grid size of advective flow field simulation, must be float (meter)
     wind_grid_size = 'None'
     # mean advection vector
     mean_wind_vector = 'None'
     # colored noise params
     wind_colored_noise_params = 'None'
+
+    # [plume]
+    plume_model_params = 'None'
 
     # [camera]
     camera_view = 'None'
@@ -61,12 +66,18 @@ def set_odor_source_pos(pos):
 def get_odor_source_pos():
     return eval(Settings.odor_source_pos)
 
+def set_dt(dt):
+    Settings.dt = dt
+def get_dt():
+    return Settings.dt
+
 def set_wind_model(name):
     Settings.wind_model = name
 def get_wind_model():
     return Settings.wind_model
 
 def set_wind_grid_size(gsize):
+    # Notice: must be float type
     Settings.wind_grid_size = gsize
 def get_wind_grid_size():
     return Settings.wind_grid_size
@@ -80,6 +91,11 @@ def set_wind_colored_noise_params(params):
     Settings.wind_colored_noise_params = str(params)
 def get_wind_colored_noise_params():
     return eval(Settings.wind_colored_noise_params)
+
+def set_plume_model_params(params):
+    Settings.plume_model_params = str(params)
+def get_plume_model_params():
+    return eval(Settings.plume_model_params)
 
 # camera view is tuple type: [float,float,float,array[float,float,float]]
 def set_camera_view(cam):
@@ -101,10 +117,12 @@ def load_settings():
     cp.read(cfgfile_path)
     Settings.sim_area_size = cp.get('setup', 'sim_area_size')
     Settings.odor_source_pos = cp.get('setup', 'odor_source_pos')
+    Settings.dt = cp.getfloat('setup', 'dt')
     Settings.wind_model = cp.get('wind', 'wind_model')
     Settings.wind_grid_size = cp.getfloat('wind', 'wind_grid_size')
     Settings.mean_wind_vector = cp.get('wind', 'mean_wind_vector')
     Settings.wind_colored_noise_params = cp.get('wind', 'colored_noise_params')
+    Settings.plume_model_params = cp.get('plume', 'params')
     Settings.camera_view = cp.get('camera', 'camera_view')
 
 def save_settings():
@@ -118,10 +136,12 @@ def save_settings():
     cp.read(cfgfile_path)
     cp.set('setup', 'sim_area_size', Settings.sim_area_size)
     cp.set('setup', 'odor_source_pos', Settings.odor_source_pos)
+    cp.set('setup', 'dt', str(Settings.dt))
     cp.set('wind', 'wind_model', Settings.wind_model)
     cp.set('wind', 'wind_grid_size', str(Settings.wind_grid_size))
     cp.set('wind', 'mean_wind_vector', Settings.mean_wind_vector)
     cp.set('wind', 'colored_noise_params', Settings.wind_colored_noise_params)
+    cp.set('plume', 'params', Settings.plume_model_params)
     cp.set('camera', 'camera_view', Settings.camera_view)
     cp.write(open(cfgfile_path, 'w'))
 

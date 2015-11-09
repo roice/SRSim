@@ -37,12 +37,12 @@ class SimulationThread(Thread):
     wants_abort = False
 
     # params converted from outside
-    grid = None
     wind_model = None
     count_sime_step = None
     update_scene = None
     display = None
     wind = None
+    plume = None
 
     # data for outside display
     wind_vector_field = None
@@ -56,6 +56,8 @@ class SimulationThread(Thread):
         # init simulation
         ''' Init wind field '''
         self.wind.wind_init(self.wind_model)
+        ''' Init plume field '''
+        self.plume.plume_init()
         while not self.wants_abort:
             sim_step += 1
             ''' Update wind field '''
@@ -64,14 +66,13 @@ class SimulationThread(Thread):
                 # copy wind result to local
                 self.wind_vector_field = self.wind.wind_vector_field
             ''' Update pollutant diffusion '''
+            self.plume.adv_field = self.wind_vector_field
+            self.plume.adv_vertex = self.wind.wind_at_vertex
+            self.plume.plume_update()
             ''' Update robot position '''
-            # retrieve mesh grid
-            x, y, z = self.grid
-            # compute wind field
-            # compute odor field
-            #srsim_plume_simulator('farrell', self.grid, self.data_wind_field, self.odor_source_pos, self.sim_step)
+
             # update sim count & sim scene visualization
             self.count_sim_step()
             GUI.invoke_later(self.update_scene)
-            sleep(0.02)
+            #sleep(0.005)
         self.display('###### Simulation stopped ######')

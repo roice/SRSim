@@ -43,6 +43,9 @@ from time import sleep
 import srsim_config as Config
 from srsim_loop import SimulationThread
 from srsim_wind import Advection
+from srsim_plume import FilamentModel
+# for debug
+from sys import exit
 
 #############################################################################
 #! Global parameters
@@ -69,7 +72,9 @@ class ControlPanel(HasTraits):
     # ---- Control tab ----
     button_start_stop_simulation = Button("Start/Stop simulation")
     # Range of simulation area (length * width * height), unit: meter
-    area_length, area_width, area_height = Float, Float, Float
+    area_length, area_width, area_height = Int, Int, Int
+    # sim time interval
+    sim_dt = Float
     # simulation step count
     text_sim_step_count = Int
     # button for camera info saving
@@ -94,6 +99,10 @@ class ControlPanel(HasTraits):
     enum_plume_model = Enum('farrell', 'other')
     init_odor_source_pos_x, init_odor_source_pos_y,\
             init_odor_source_pos_z = Float, Float, Float
+    fila_release_per_sec = Int
+    fila_centerline_dispersion_sigma = Float
+    fila_growth_rate = Float
+    # ---- Dispay ----
     # simulator running state display
     textbox_sim_state_display = String()
 
@@ -104,12 +113,6 @@ class ControlPanel(HasTraits):
     grid = Tuple(Array, Array, Array)
     # ---- mean wind flow vector instantaneously
     mean_wind_vector = Tuple(Float, Float, Float)
-    # ---- plume scalar field
-    data_odor_field = Array
-    # ---- masked odor field grid, for quick display
-    grid_odor_masked = Array
-    # ---- odor source position tuple
-    odor_source_pos = Tuple(Float, Float, Float)
 
     ###################################
     # ======== Events ========
@@ -119,7 +122,7 @@ class ControlPanel(HasTraits):
     ###################################
     # ======== Streamlines ========
     wind_field = Instance(HasTraits)
-    odor_field = Instance(HasTraits)
+    odor_field = None
 
     ###################################
     # ======== Other ========
@@ -127,7 +130,6 @@ class ControlPanel(HasTraits):
     sim_thread = Instance(SimulationThread)
     scene = Instance(MlabSceneModel)
     wind = Advection()
-
 
     ###################################
     # view
@@ -137,25 +139,31 @@ class ControlPanel(HasTraits):
                 Group(
                     Group(
                         Item('area_length',
-                            editor = RangeEditor(   low = '1.0',
-                                                    high = '50.0',
-                                                    format = '%.1f',
+                            editor = RangeEditor(   low = '1',
+                                                    high = '50',
+                                                    format = '%d',
                                                     mode = 'slider'),
                             label = 'L (meters)'),
                         Item('area_width',
-                            editor = RangeEditor(   low = '1.0',
-                                                    high = '50.0',
-                                                    format = '%.1f',
+                            editor = RangeEditor(   low = '1',
+                                                    high = '50',
+                                                    format = '%d',
                                                     mode = 'slider'),
                             label = 'W (meters)'),
                         Item('area_height',
-                            editor = RangeEditor(   low = '1.0',
-                                                    high = '50.0',
-                                                    format = '%.1f',
+                            editor = RangeEditor(   low = '1',
+                                                    high = '50',
+                                                    format = '%d',
                                                     mode = 'slider'),
                             label = 'H (meters)'),
                         label = 'Area Size L/W/H', show_border=True,
                         enabled_when = "params_allow_change == True"),
+                    Item('sim_dt',
+                        editor = RangeEditor(   low = '0.01',
+                                                high = '0.1',
+                                                format = '%.2f',
+                                                mode = 'slider'),
+                        label = 'delta t (second)'),
                     Group(
                         Item('button_save_camera_angle', show_label = False),
                         label = 'Camera view', show_border = True),
@@ -267,7 +275,28 @@ class ControlPanel(HasTraits):
                                                     format = '%.1f',
                                                     mode = 'auto'),
                             label = 'z (m):',),
-                        label = 'Init odor source position (x,y,z) (m)', show_border=True),
+                        label = 'Odor source position (x,y,z) (m)', show_border=True),
+                    Item('fila_centerline_dispersion_sigma',
+                        editor = RangeEditor(   low = '0.0',
+                                                high = '10.0',
+                                                format = '%.1f',
+                                                mode = 'slider'),
+                        label = 'Sigma (m/s/sqr(Hz))',
+                        visible_when = "enum_plume_model == 'farrell'"),
+                    Item('fila_growth_rate',
+                        editor = RangeEditor(   low = '0.0',
+                                                high = '1.0',
+                                                format = '%.3f',
+                                                mode = 'slider'),
+                        label = 'Growth rate (meter/sec)',
+                        visible_when = "enum_plume_model == 'farrell'"),
+                    Item('fila_release_per_sec',
+                        editor = RangeEditor(   low = '1',
+                                                high = '100',
+                                                format = '%d',
+                                                mode = 'slider'),
+                        label = 'Release rate (fila number/sec)',
+                        visible_when = "enum_plume_model == 'farrell'"),
                     label = 'Plume', dock = 'tab',
                     enabled_when = "params_allow_change == True"),
                 layout = 'tabbed'),
@@ -292,6 +321,9 @@ class ControlPanel(HasTraits):
     def _area_height_default(self):
         size = Config.get_sim_area_size()
         return size[2]
+
+    def _sim_dt_default(self):
+        return Config.get_dt()
 
     def _params_allow_change_default(self):
         return True
@@ -346,23 +378,21 @@ class ControlPanel(HasTraits):
         vector = Config.get_mean_wind_vector()
         return vector[0], vector[1], vector[2]
 
-    def _data_odor_field_default(self):
-        x, y, z = self.grid
-        o = np.ones_like(x)
-        return o
+    def _fila_centerline_dispersion_sigma_default(self):
+        params = Config.get_plume_model_params()
+        return params[0]
+
+    def _fila_growth_rate_default(self):
+        params = Config.get_plume_model_params()
+        return params[1]
+
+    def _fila_release_per_sec_default(self):
+        params = Config.get_plume_model_params()
+        return params[2]
 
     def _text_sim_step_count_default(self):
         c = 0
         return c
-
-    def _odor_field_default(self):
-        x = self.init_odor_source_pos_x
-        y = self.init_odor_source_pos_y
-        z = self.init_odor_source_pos_z
-        o = [1.0]
-        odor_field = self.scene.mlab.points3d(x, y, z, o, colormap = "cool",
-                opacity = 0.3, transparent = True, scale_factor=1.0)
-        return odor_field
 
     ###################################
     # ======== Listening ========
@@ -382,20 +412,16 @@ class ControlPanel(HasTraits):
         self.wind.uniform_tinv()
         u, v, w = self.wind.wind_vector_field
         x, y, z = self.grid
-        self.wind_field = self.scene.mlab.quiver3d(x, y, z, u, v, w)
+        self.wind_field = self.scene.mlab.quiver3d(x, y, z, u, v, w, reset_zoom=False)
         # axes and outlines
         self.func_init_axes_outline()
         # camera view
         self.scene.mlab.view(*Config.get_camera_view())
-        # compute odor field(init)
-        #self.func_odor_field_init()
-        o_m = [1.0]
-        self.odor_field.mlab_source.set(s=o_m)
 
     @on_trait_change('area_length, area_width, area_height')
     def change_area_size(self):
         # change mesh grid to new shape
-        gsize = Config.get_wind_grid_size()
+        gsize = Config.get_wind_grid_size() # get advection grid size
         x, y, z = np.mgrid[gsize/2.0:self.area_length:gsize, gsize/2.0:self.area_width:gsize,
                 gsize/2.0:self.area_height:gsize]
         self.grid = x, y, z
@@ -410,12 +436,18 @@ class ControlPanel(HasTraits):
         # draw wind vector field
         self.wind.uniform_tinv()
         u, v, w = self.wind.wind_vector_field
-        self.wind_field = self.scene.mlab.quiver3d(x, y, z, u, v ,w)
+        self.wind_field.remove()
+        self.wind_field = self.scene.mlab.quiver3d(x, y, z, u, v ,w, reset_zoom=False)
         # draw axes & outline
         self.func_init_axes_outline()
         self.scene.disable_render = False
         # save area setting to global settings
         Config.set_sim_area_size([self.area_length, self.area_width, self.area_height])
+
+    @on_trait_change('sim_dt')
+    def change_dt(self):
+        # save sim dt to global settings
+        Config.set_dt(self.sim_dt)
 
     @on_trait_change('enum_advection_model, uniform_advection_vector_x, \
             uniform_advection_vector_y, uniform_advection_vector_z, \
@@ -455,17 +487,15 @@ class ControlPanel(HasTraits):
         # change odor source position
         x, y, z = self.init_odor_source_pos_x,\
                 self.init_odor_source_pos_y, self.init_odor_source_pos_z
-        o = [1.0]
-        self.odor_field.mlab_source.set(x=x, y=y, z=z)
-        # remove previous drawing of odor source
-        #self.odor_field.remove()
-        # re-draw odor source
-        #self.odor_field = self.scene.mlab.points3d(x, y, z, o, colormap = "cool",
-        #        opacity = 0.3, transparent = True, scale_factor=1.0)
         # save pos setting to global settings
         Config.set_odor_source_pos([self.init_odor_source_pos_x,\
                 self.init_odor_source_pos_y, self.init_odor_source_pos_z])
 
+    @on_trait_change('fila_release_per_sec, fila_centerline_dispersion_sigma, fila_growth_rate')
+    def change_farrell_params(self):
+        # save farrell params to global settings
+        Config.set_plume_model_params([self.fila_centerline_dispersion_sigma, \
+                self.fila_growth_rate, self.fila_release_per_sec])
 
     def _button_start_stop_simulation_fired(self):
         ''' Callback of the "start/stop simulation" button, this starts
@@ -480,6 +510,15 @@ class ControlPanel(HasTraits):
         else:
             # disable area size changing item (GUI)
             self.params_allow_change = False
+            # check if need re-init scene
+            if self.sim_thread != None:
+                # re-init scene
+                self.odor_field.remove()
+                self.wind_field.remove()
+                self.wind.uniform_tinv()
+                u, v, w = self.wind.wind_vector_field
+                x, y, z = self.grid
+                self.wind_field = self.scene.mlab.quiver3d(x, y, z, u, v, w, reset_zoom=False)
             # print simulator settings
             sim_area_str = 'Sim Area (L*W*H): %.1f m * %.1f m * %.1f m\n\
                     Grid size: %.1f m' %(self.area_length, self.area_width,
@@ -505,23 +544,32 @@ class ControlPanel(HasTraits):
             self.sim_thread.display = self.add_text_line
             # wind sim instance
             self.sim_thread.wind = self.wind
-            # copy self.grid
-            self.sim_thread.grid = self.grid
+            self.wind.dt = self.sim_dt
             # send wind model selection to sim_thread
             self.sim_thread.wind_model = self.enum_advection_model
+            # plume sim instance
+            if self.enum_plume_model == 'farrell':
+                self.sim_thread.plume = FilamentModel()
+                self.sim_thread.plume.odor_source_pos = [self.init_odor_source_pos_x,\
+                    self.init_odor_source_pos_y, self.init_odor_source_pos_z]
+                self.sim_thread.plume.sim_area_size = [self.area_length, self.area_width, self.area_height]
+                self.sim_thread.plume.dt = self.sim_dt
+                self.sim_thread.plume.adv_mesh = self.grid
+                self.sim_thread.plume.adv_xyz_n = self.wind.xyz_n
+                self.sim_thread.plume.adv_gsize = self.wind.gsize
+                self.sim_thread.plume.vm_sigma = self.fila_centerline_dispersion_sigma
+                self.sim_thread.plume.fila_growth_rate = self.fila_growth_rate
+                self.sim_thread.plume.fila_number_per_sec = self.fila_release_per_sec
+                self.odor_field = self.scene.mlab.points3d([0.0], [0.0], [0.0], [0.0], \
+                        scale_factor=1, reset_zoom=False)
+            else:
+                exit('Error: Other plume model not supported yet...')
             # send odor source pos to sim_thread
-            self.odor_source_pos = self.init_odor_source_pos_x,\
-                self.init_odor_source_pos_y, self.init_odor_source_pos_z
-            self.sim_thread.odor_source_pos = self.odor_source_pos
             self.sim_thread.start()
 
     def _event_need_update_scene_fired(self):
         self.scene.disable_render = True
-        # update wind field display
-        u, v, w = self.sim_thread.wind_vector_field
-        #print 'u.shape = ' + str(u.shape)
-        #print 'u = ' + str(u)
-        self.wind_field.mlab_source.set(u=u, v=v, w=w)
+        self.func_update_scene()
         self.scene.disable_render = False
 
     def _button_save_camera_angle_fired(self):
@@ -551,6 +599,18 @@ class ControlPanel(HasTraits):
         self.scene.mlab.outline(extent=[0, self.area_length, 0,
             self.area_width, 0, self.area_height],)
 
+    # update scene
+    def func_update_scene(self):
+        # update wind field display
+        u, v, w = self.sim_thread.wind_vector_field
+        self.wind_field.mlab_source.set(u=u, v=v, w=w)
+        # update odor field display
+        fila = self.sim_thread.plume.fila_snapshot
+        # update obj
+        self.odor_field.mlab_source.reset(x=fila['x'], y=fila['y'], z=fila['z'], scalars=fila['r']*50, \
+                color = (0,0,0), scale_factor=1, reset_zoom=False)
+        self.odor_field.mlab_source.set(x=fila['x']) # to trig display refresh
+
     # slice 3d mesh matrix to smaller matrix for quick display
     '''
     input:
@@ -574,11 +634,6 @@ class ControlPanel(HasTraits):
         y_s = y[0, interval/2:y.shape[1]:interval, 0]
         z_s = z[0, 0, interval/2:z.shape[2]:interval]
         return x_s, y_s, z_s
-
-    # init odor (concentration) field
-    def func_odor_field_init(self):
-        self.data_odor_field = srsim_plume(self.enum_plume_model, self.grid,
-                self.data_wind_field)
 
 class MainWindowHandler(Handler):
     def close(self, info, is_OK):
