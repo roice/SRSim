@@ -59,6 +59,7 @@ class FilamentModel:
     fila_growth_rate = None
     # fila number per second
     fila_number_per_sec = None
+    odor_release_rate = None # release rate, molecules/s
 
     # === Internal exchanging data ===
     # advection mesh & vector field of the whole area
@@ -66,6 +67,8 @@ class FilamentModel:
     va_field = None
     # the filament number should release
     fila_number_need_release = None
+    # molecules per filament
+    mole_per_filament = None
     # data structure type of odor filament
     fila_type = np.dtype({ \
             'names':['x','y','z','r'], \
@@ -104,11 +107,13 @@ class FilamentModel:
                         self.adv_gsize*self.adv_xyz_n[2]]])
         #    interpolate wind advection on finer grids, including the edge area
         va = [[],[],[]] # wind advection on finer grid
-        for i in range(3): # 3 dim
-            va[i] = np.array(interpolate.griddata(np.array(zip( \
+        #    get known points for quick cycle
+        points = np.array(zip( \
                     np.hstack((self.adv_mesh[0].reshape(1,-1)[0], vertex[:,0])), \
                     np.hstack((self.adv_mesh[1].reshape(1,-1)[0], vertex[:,1])), \
-                    np.hstack((self.adv_mesh[2].reshape(1,-1)[0], vertex[:,2])))), \
+                    np.hstack((self.adv_mesh[2].reshape(1,-1)[0], vertex[:,2]))))
+        for i in range(3): # 3 dim
+            va[i] = np.array(interpolate.griddata(points, \
                     np.hstack((self.adv_field[i].reshape(1,-1)[0], self.adv_vertex[:,i])), \
                     (self.va_mesh[0], self.va_mesh[1], self.va_mesh[2]), method = 'linear'))
         #  interpolate wind advection at fila's positions
@@ -150,10 +155,47 @@ class FilamentModel:
                 self.odor_source_pos[2], 0.001)], dtype = self.fila_type)
         self.fila = np.append(self.fila, new_fila)
 
+    # sample the odor concentration value at robot's position
+    # the concentration at location x due to the i-th filament (location p_i) is modeled as
+    #                       Q
+    #  C_i(x) = --------------------------- exp(- delta' * SIGMA^(-1) * delta)
+    #            sqr(8*pi^3 * det(SIGMA))
+    #  delta = x - p_i
+    #
+    #            sigma
+    #  SIGMA = [      sigma     ] when wind vector at p_i is (0,0,0)
+    #                      sigma
+    def odor_conc_value_sampling(self, pos):
+        # use filament model as default plume model
+        #   get fila number
+        N = len(self.fila)
+        #   calculate SIGMA of all fila
+        SIGMA = np.array([ [[1, 0, 0],[0, 1, 0],[0, 0, 1]] for i in range(N) ])
+        #   calculate det(SIGMA)
+        SIGMA_det = np.linalg.det(SIGMA)
+        #   calculate SIGMA^(-1)
+        SIGMA_inv = np.linalg.inv(SIGMA)
+        #   calculate delta of robot pos to all fila
+        delta = np.array([ [[\
+                    pos[0] - self.fila[i]['x'], \
+                    pos[1] - self.fila[i]['y'], \
+                    pos[2] - self.fila[i]['z']]] for i in range(N) ])
+        #   calculate delta'
+        delta_T = np.array([ delta[i].T for i in range(N) ])
+        # calculate exp power
+        power = np.array([ -np.dot(np.dot(delta[i], SIGMA_inv[i]),delta_T[i])[0,0] for i in range(N) ])
+        # concentration contribution due to all fila
+        conc_fila = self.mole_per_filament/np.power(8*np.power(np.pi, 3)*SIGMA_det, 1./2.)*np.exp(power)
+        # concentration at this position
+        conc = np.dot(np.array([conc_fila]), np.array([[1.] for i in range(N)]))[0,0]
+        return conc
+
     def __init__(self):
-        self.vm_sigma = 2.0 # m/s/sqr(Hz)
+        self.vm_sigma = 2.0 # m/s/sqr(Hz), float
         self.fila_growth_rate = 0.001 # expand 0.001 meter per second
-        self.fila_number_per_sec = 10 # release 10 fila per sec
+        self.fila_number_per_sec = 10 # release 10 fila per sec, integer
+        self.odor_release_rate = 10.0 # molecules/s, must be float
+        self.mole_per_filament = self.odor_release_rate/self.fila_number_per_sec
 
 # plume model wrapper
 #  example: plume = Dispersion('farrell')

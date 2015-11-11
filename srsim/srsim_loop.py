@@ -74,7 +74,7 @@ class SimulationThread(Thread):
             #    copy plume result to local for outside display
             self.plume_snapshot = self.plume.fila
             # Update robot position
-
+            self.robot.robot_update()
             # update sim count & sim scene visualization
             self.count_sim_step()
             GUI.invoke_later(self.update_scene)

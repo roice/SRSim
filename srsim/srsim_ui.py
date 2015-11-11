@@ -31,7 +31,7 @@ import numpy as np
 from traits.api import HasTraits, Array, Instance, Button, Enum, String,\
         Range, Array, Tuple, Int, Float, Event, on_trait_change, Bool, List,\
         Str
-from traitsui.api import View, Item, Group, HGroup, HSplit, VSplit,\
+from traitsui.api import View, Item, Group, HGroup, VGroup, HSplit, VSplit,\
         ButtonEditor, TextEditor, EnumEditor, RangeEditor, Handler,\
         CheckListEditor, BooleanEditor
 from mayavi import mlab
@@ -44,6 +44,7 @@ import srsim_config as Config
 from srsim_loop import SimulationThread
 from srsim_wind import Advection
 from srsim_plume import FilamentModel
+from srsim_robot import Robot
 # Robot drawing
 from tvtk.tools import visual
 # for debug
@@ -81,6 +82,8 @@ class ControlPanel(HasTraits):
     sim_scene_switch = Bool
     # simulation step count
     text_sim_step_count = Int
+    # simulation time count
+    text_sim_time_count = String
     # button for camera info saving
     button_save_camera_angle = Button("Save camera angle")
 
@@ -138,7 +141,7 @@ class ControlPanel(HasTraits):
     wind_field = Instance(HasTraits)
     odor_field = None
     odor_source = None # use visual to display a cylinder as the source
-    robot = None # use visual.frame to draw a robot
+    robot_draw = None # use visual.frame to draw a robot
 
     ###################################
     # ======== Other ========
@@ -146,6 +149,7 @@ class ControlPanel(HasTraits):
     sim_thread = Instance(SimulationThread)
     scene = Instance(MlabSceneModel)
     wind = Advection()
+    robot = Robot()
 
     ###################################
     # view
@@ -190,14 +194,18 @@ class ControlPanel(HasTraits):
                                                     "off":False}),
                         label = 'Scene switch',
                         enabled_when = "params_allow_change == True")),
-                    Item('button_start_stop_simulation', \
-                                show_label = False),
-                    Group(
+                    VGroup(
                         Item('text_sim_step_count',
                             editor = TextEditor(    auto_set = False,
                                                     enter_set = False),
                             label = 'Step', style = 'readonly'),
-                        label = 'Simulation Step count', show_border=True),
+                        Item('text_sim_time_count',
+                            editor = TextEditor(    auto_set = False,
+                                                    enter_set = False),
+                            label = 'Time', style = 'readonly'),
+                        label = 'Simulation Step /& Time', show_border=True),
+                    Item('button_start_stop_simulation', \
+                                show_label = False),
                     label = 'Control', dock = 'tab'),
                 # Wind tab
                 Group(
@@ -304,6 +312,7 @@ class ControlPanel(HasTraits):
                         visible_when = "enum_plume_model == 'farrell'"),
                     label = 'Plume', dock = 'tab',
                     enabled_when = "params_allow_change == True"),
+                # Robot tab
                 Group(
                     Group(
                         Item('init_robot_pos_x',
@@ -425,8 +434,10 @@ class ControlPanel(HasTraits):
         return params[2]
 
     def _text_sim_step_count_default(self):
-        c = 0
-        return c
+        return 0
+
+    def _text_sim_time_count_default(self):
+        return '0.0 s'
 
     ###################################
     # ======== Listening ========
@@ -455,7 +466,7 @@ class ControlPanel(HasTraits):
         #        length = op[2], radius = 0.1)
         self.odor_source = visual.box(pos=(op[0], op[1], op[2]/2.0), length = 0.1, \
                 height = 0.1, width = op[2], color = (0x05/255.0, 0x5f/255.0,0x58/255.0), )
-        #   init robot obj
+        #   init robot drawing obj
         rp = Config.get_robot_init_pos()
         self.func_init_robot_shape(rp)
         # axes and outlines
@@ -534,9 +545,9 @@ class ControlPanel(HasTraits):
 
     @on_trait_change('init_robot_pos_x, init_robot_pos_y, init_robot_pos_z')
     def change_init_robot_pos(self):
-        # change the pos of robot obj
+        # change the pos of robot drawing obj
         x, y, z = self.init_robot_pos_x, self.init_robot_pos_y, self.init_robot_pos_z
-        self.robot.pos = (x, y, z)
+        self.robot_draw.pos = (x, y, z)
         # save pos setting to global settings
         Config.set_robot_init_pos([x, y, z])
 
@@ -569,6 +580,7 @@ class ControlPanel(HasTraits):
                 x, y, z = self.grid
                 self.wind_field = self.scene.mlab.quiver3d(x, y, z, u, v, w, reset_zoom=False)
             # print simulator settings
+            self.textbox_sim_state_display = '' # clear display
             sim_area_str = 'Sim Area (L*W*H): %.1f m * %.1f m * %.1f m\n\
                     Grid size: %.1f m' %(self.area_length, self.area_width,
                             self.area_height, Config.get_wind_grid_size())
@@ -589,6 +601,7 @@ class ControlPanel(HasTraits):
             self.sim_thread.count_sim_step = self.func_sim_step_count
             # clear count
             self.text_sim_step_count = 0
+            self.text_sim_time_count = '0.0 s'
             # sim textbox state display function
             self.sim_thread.display = self.add_text_line
             # wind sim instance
@@ -613,7 +626,13 @@ class ControlPanel(HasTraits):
                         color = (0,0,0), scale_factor=1, reset_zoom=False)
             else:
                 exit('Error: Other plume model not supported yet...')
-            # send odor source pos to sim_thread
+            # robot instance
+            self.sim_thread.robot = self.robot
+            #  robot init position
+            self.robot.robot_pos = [self.init_robot_pos_x, self.init_robot_pos_y, self.init_robot_pos_z]
+            #  odor sampling routine
+            self.robot.odor_sampling = self.sim_thread.plume.odor_conc_value_sampling
+            # start simulation thread
             self.sim_thread.start()
 
     def _event_need_update_scene_fired(self):
@@ -640,7 +659,10 @@ class ControlPanel(HasTraits):
         self.event_need_update_scene = True
 
     def func_sim_step_count(self):
+        # count sim step
         self.text_sim_step_count += 1
+        # count sim time
+        self.text_sim_time_count = '%.1f s' %(self.text_sim_step_count*self.sim_dt)
 
     # draw axes & outlines on current scene
     def func_init_axes_outline(self):
@@ -655,17 +677,17 @@ class ControlPanel(HasTraits):
         # draw 4 propellers
         d = 0.145 # diameter of propeller is 14.5 cm
         w = 0.16 # wheelbase is 16 cm (shortest distance between centers of two adjacent propellers)
-        p1 = visual.ring(frame=self.robot, pos=(w/2.0, w/2.0, 0), axis = (0, 0, 1), \
+        p1 = visual.ring(pos=(w/2.0, w/2.0, 0), axis = (0, 0, 1), \
                 radius = d/2.0, thickness = 0.01, color = (1.0, 0, 0)) # Red
-        p2 = visual.ring(frame=self.robot, pos=(w/2.0, -w/2.0, 0), axis = (0, 0, 1), \
+        p2 = visual.ring(pos=(w/2.0, -w/2.0, 0), axis = (0, 0, 1), \
                 radius = d/2.0, thickness = 0.01, color = (0, 0, 1.0)) # Blue
-        p3 = visual.ring(frame=self.robot, pos=(-w/2.0, -w/2.0, 0), axis = (0, 0, 1), \
+        p3 = visual.ring(pos=(-w/2.0, -w/2.0, 0), axis = (0, 0, 1), \
                 radius = d/2.0, thickness = 0.01, color = (0, 0, 1.0)) # Blue
-        p4 = visual.ring(frame=self.robot, pos=(-w/2.0, w/2.0, 0), axis = (0, 0, 1), \
+        p4 = visual.ring(pos=(-w/2.0, w/2.0, 0), axis = (0, 0, 1), \
                 radius = d/2.0, thickness = 0.01, color = (1.0, 0, 0)) # Red
         # robot shape is a frame composites different objects
-        self.robot = visual.frame(p1, p2, p3, p4)
-        self.robot.pos = (robot_pos[0], robot_pos[1], robot_pos[2])
+        self.robot_draw = visual.frame(p1, p2, p3, p4)
+        self.robot_draw.pos = (robot_pos[0], robot_pos[1], robot_pos[2])
 
     # update scene
     def func_update_scene(self):
