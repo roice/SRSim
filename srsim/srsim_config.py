@@ -52,6 +52,9 @@ class Settings:
     # [plume]
     plume_model_params = 'None'
 
+    # [robot]
+    robot_init_pos = 'None'
+
     # [camera]
     camera_view = 'None'
 
@@ -65,6 +68,11 @@ def set_odor_source_pos(pos):
     Settings.odor_source_pos = str(pos)
 def get_odor_source_pos():
     return eval(Settings.odor_source_pos)
+
+def set_robot_init_pos(pos):
+    Settings.robot_init_pos = str(pos)
+def get_robot_init_pos():
+    return eval(Settings.robot_init_pos)
 
 def set_dt(dt):
     Settings.dt = dt
@@ -123,6 +131,7 @@ def load_settings():
     Settings.mean_wind_vector = cp.get('wind', 'mean_wind_vector')
     Settings.wind_colored_noise_params = cp.get('wind', 'colored_noise_params')
     Settings.plume_model_params = cp.get('plume', 'params')
+    Settings.robot_init_pos = cp.get('robot', 'robot_init_pos')
     Settings.camera_view = cp.get('camera', 'camera_view')
 
 def save_settings():
@@ -142,6 +151,7 @@ def save_settings():
     cp.set('wind', 'mean_wind_vector', Settings.mean_wind_vector)
     cp.set('wind', 'colored_noise_params', Settings.wind_colored_noise_params)
     cp.set('plume', 'params', Settings.plume_model_params)
+    cp.set('robot', 'robot_init_pos', Settings.robot_init_pos)
     cp.set('camera', 'camera_view', Settings.camera_view)
     cp.write(open(cfgfile_path, 'w'))
 

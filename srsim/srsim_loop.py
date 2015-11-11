@@ -29,6 +29,7 @@ Documentation and tests are included in ...
 from threading import Thread
 from time import sleep
 from pyface.api import GUI
+import gc
 
 class SimulationThread(Thread):
     ''' Simulation loop.
@@ -37,15 +38,17 @@ class SimulationThread(Thread):
     wants_abort = False
 
     # params converted from outside
-    wind_model = None
+    wind_model = None # wind model selection
     count_sime_step = None
     update_scene = None
-    display = None
-    wind = None
-    plume = None
+    display = None # print text to outside item
+    wind = None # instance of wind field calculation class
+    plume = None # instance of plume calculation class
+    robot = None # instance of robot navigation class
 
     # data for outside display
     wind_vector_field = None
+    plume_snapshot = None
 
     def run(self):
         ''' Runs the simulation loop
@@ -53,23 +56,24 @@ class SimulationThread(Thread):
 
         # Reset simulation step
         sim_step = 0
-        # init simulation
-        ''' Init wind field '''
+        # Init simulation
+        #  Init wind field
         self.wind.wind_init(self.wind_model)
-        ''' Init plume field '''
+        #  Init plume field
         self.plume.plume_init()
         while not self.wants_abort:
             sim_step += 1
-            ''' Update wind field '''
-            if self.wind_model != 'uniform':
-                self.wind.wind_update()
-                # copy wind result to local
-                self.wind_vector_field = self.wind.wind_vector_field
-            ''' Update pollutant diffusion '''
+            # Update wind field
+            self.wind.wind_update()
+            #    copy wind result to local for outside display
+            self.wind_vector_field = self.wind.wind_vector_field
+            # Update pollutant diffusion
             self.plume.adv_field = self.wind_vector_field
             self.plume.adv_vertex = self.wind.wind_at_vertex
             self.plume.plume_update()
-            ''' Update robot position '''
+            #    copy plume result to local for outside display
+            self.plume_snapshot = self.plume.fila
+            # Update robot position
 
             # update sim count & sim scene visualization
             self.count_sim_step()

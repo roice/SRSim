@@ -34,6 +34,8 @@ from mayavi import mlab
 
 class Advection():
     # === Params configured from outside ===
+    # wind model selection
+    wind_model_sel = None
     # sim area size
     gsize = None  # grid size
     xyz_n = None  # x,y,z grid numbers, e.g., (100, 100, 100) for cubic sim area
@@ -49,8 +51,6 @@ class Advection():
 
     # === Parameters for exchanging data between functions ===
     mesh = None
-    phi = None
-    eqn = None
     # wind vector random increment of vertex points, static variables
     vertexWindVecRanInc = None
     # wind mesh cell centers
@@ -68,11 +68,6 @@ class Advection():
         # step 1: Mesh
         self.mesh = Grid3D(dx=self.gsize, dy=self.gsize, dz=self.gsize, \
                 nx=self.xyz_n[0], ny=self.xyz_n[1], nz=self.xyz_n[2])
-
-        # step 2: Equation
-        self.phi = CellVariable(mesh=self.mesh, name='potential phi', value=0.)
-        self.eqn = (DiffusionTerm(coeff = 1.) == 0.)
-        #print 'ic&iv&ir flow initiated'
         # clear colored noise static parameters
         self.vertexWindVecRanInc = [ [ [0 for i in range(2)] for i in range(3)] for i in range(8)]
 
@@ -89,6 +84,9 @@ class Advection():
     #          |  /                  | /                   z
     #       vertex 4 ------------ vertex 5
     def icivir_cuboid_solve(self):
+        # step 2: Equation
+        phi = CellVariable(mesh=self.mesh, name='potential phi', value=0.)
+        eqn = (DiffusionTerm(coeff = 1.) == 0.)
         # step 3: Boundary conditions
         # compute flow of 8 vertexes
         # one vertex has 3 components of wind vector, (x, y, z)
@@ -154,22 +152,19 @@ class Advection():
                 grad_phi_bc[:, self.mesh.facesBack()] = np.array([vx, vy, vz])
         #print 'grad_phi_bc[ext] = ' + str(grad_phi_bc[:, self.mesh.exteriorFaces()])
         # set neumann boundary condition
-        self.phi.faceGrad.constrain(((grad_phi_bc[0]),(grad_phi_bc[1]), (grad_phi_bc[2])), where=self.mesh.exteriorFaces)
+        phi.faceGrad.constrain(((grad_phi_bc[0]),(grad_phi_bc[1]), (grad_phi_bc[2])), where=self.mesh.exteriorFaces)
         # set dirichlet boundary condition
         # set /phi value on one point of a cell, to provide a init value for equaition solver
         #   get all points which lie on the center of faces of cells
         X, Y, Z = self.mesh.faceCenters
         mask = ((X == self.gsize/2) & (Y == self.gsize/2) & (Z == 0)) # front face of cell 0
-        self.phi.constrain(0, where=self.mesh.exteriorFaces & mask)
-
+        phi.constrain(0, where=self.mesh.exteriorFaces & mask)
         # step 4: Solve
-        self.eqn.solve(var=self.phi)
+        eqn.solve(var=phi)
         # Post processing
         #   get /phi array
-        self.wind_phi_field = np.array(self.phi).reshape(self.xyz_n[2], \
+        self.wind_phi_field = np.array(phi).reshape(self.xyz_n[2], \
                 self.xyz_n[1], self.xyz_n[0]).T
-        #print 'wind_mesh_centers = ' + str(self.mesh.cellCenters())
-        #print 'wind_phi_field = ' + str(self.wind_phi_field)
         #   convert /phi to wind vector
         self.wind_vector_field = np.array(np.gradient(self.wind_phi_field, self.gsize))
         #print 'wind_vector_field = ' + str(self.wind_vector_field)
@@ -232,45 +227,71 @@ class Advection():
         x[0] += x[1] * self.dt
         return x[0]
 
-    ''' Uniform time-invariant wind model
+    '''
+    Constant flow:
+    Uniform time-invariant wind model
     input: x/y/z    points to sample, mgrid arrays
     input: vector   uniform wind vector
     output: u/v/w   wind vector arrays
     '''
     def uniform_tinv(self):
-        mesh = np.mgrid[self.gsize/2:self.gsize*self.xyz_n[0]:self.gsize, \
+        self.mesh = np.mgrid[self.gsize/2:self.gsize*self.xyz_n[0]:self.gsize, \
                 self.gsize/2:self.gsize*self.xyz_n[1]:self.gsize,
                 self.gsize/2:self.gsize*self.xyz_n[2]:self.gsize]
         # init u/v/w arrays as the same shape of x/y/z
-        v = np.ones_like(mesh)
+        v = np.ones_like(self.mesh)
         # get u/v/w value
         self.wind_vector_field = np.array([v[i]*self.mean_flow[i] for i in range(3)])
+        # save these 8 vector for interp wind of edge area for plume sim
+        self.wind_at_vertex = np.array([ [self.mean_flow[i] for i in range(3)] for i in range(8)])
+
+    # uniform time variant, wind = meanflow + stochastic_variance
+    def uniform_stochastic(self):
+        # compute variance
+        var = [self.colored_noise(self.vertexWindVecRanInc[0][i]) for i in range(3)]
+        # get wind vector
+        wind = np.array(self.mean_flow) + np.array(var)
+        # get u/v/w arrays
+        v = np.ones_like(self.mesh)
+        self.wind_vector_field = np.array([v[i]*wind[i] for i in range(3)])
+        self.wind_at_vertex = np.array([ [wind[i] for i in range(3)] for i in range(8)])
 
     # call wind simulation function according to wind model selected
     '''
     input:
         wind_model_sel --- selected wind model name, type str
-            'uniform'       : constant wind field, time invariant
+            'constant'      : constant wind field, time invariant
+            'uniform'       : uniform wind field, time variant
             'irrotational'  : incompressible, inviscid, irrotational flow
             'ext'           : load external data
     '''
-    def wind_init(self, wind_model_sel):
-        if (wind_model_sel == 'uniform'):
+    def wind_init(self, sel):
+        if (sel == 'constant'):
             #print 'Wind: uniform wind field selected'
             self.uniform_tinv() # compute only once
-        elif (wind_model_sel == 'irrotational'):
-            #print 'Wind: irrotational wind field selected'
+        elif (sel == 'uniform'):
+            self.uniform_tinv() # use this function to init
+            # clear colored noise static parameters
+            self.vertexWindVecRanInc = [ [ [0 for i in range(2)] for i in range(3)] for i in range(8)]
+        elif (sel == 'irrotational'):
             self.icivir_cuboid_init()
-            # link wind_update to icivir_cuboid_solve function
-            self.wind_update = self.icivir_cuboid_solve
-
+        self.wind_model_sel = sel
+    def wind_update(self):
+        if (self.wind_model_sel == 'uniform'):
+            self.uniform_stochastic()
+        elif (self.wind_model_sel == 'irrotational'):
+            self.icivir_cuboid_solve()
 
 ##############################################################################
 # Execute if running this script
 if __name__ == '__main__':
+    from timeit import Timer
     adv = Advection()
     adv.icivir_cuboid_init()
-    adv.icivir_cuboid_solve()
+    t1=Timer("adv.icivir_cuboid_solve()")
+    print 't1 = ' + str(t1.timeit(10))
+    #adv.icivir_cuboid_solve()
+    '''
     # display
     x, y, z = np.mgrid[adv.gsize/2.0:adv.gsize*adv.xyz_n[0]:adv.gsize, \
             adv.gsize/2.0:adv.gsize*adv.xyz_n[1]:adv.gsize, \
@@ -286,3 +307,4 @@ if __name__ == '__main__':
     mlab.outline(extent=[0, adv.gsize*adv.xyz_n[0], 0, \
             adv.gsize*adv.xyz_n[1], 0, adv.gsize*adv.xyz_n[2]],)
     mlab.show()
+    '''

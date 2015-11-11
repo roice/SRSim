@@ -73,11 +73,6 @@ class FilamentModel:
     # odor filament list
     fila = None
 
-    # === Output params ===
-    fila_snapshot = None
-
-
-
     def plume_init(self):
         # release the first odor pack at source pos
         self.fila = np.array([], dtype = self.fila_type)
@@ -89,8 +84,7 @@ class FilamentModel:
         self.va_mesh = np.mgrid[ \
                 0:self.sim_area_size[0]+0.1:1.0, 0:self.sim_area_size[1]+0.1:1.0, \
                 0:self.sim_area_size[2]+0.1:1.0]
-        # update filaments snapshot for post processing
-        self.fila_snapshot = self.fila
+
     def plume_update(self):
         # Step 1: integrate positions and sizes of fila
         # centerline relative dispersion
@@ -150,8 +144,6 @@ class FilamentModel:
             for i in range(int(self.fila_number_need_release)):
                 self.odor_release()
             self.fila_number_need_release -= int(self.fila_number_need_release)
-        # update filaments snapshot for post processing
-        self.fila_snapshot = self.fila
 
     def odor_release(self):
         new_fila = np.array([(self.odor_source_pos[0], self.odor_source_pos[1],\
@@ -195,19 +187,7 @@ if __name__ == '__main__':
     plume.fila_number_per_sec = 10
     # init plume
     plume.plume_init()
-    #print 'fila_snapshot = ' + str(plume.fila_snapshot)
-    # visual
-    #p = mlab.points3d(plume.fila_snapshot['x'], plume.fila_snapshot['y'], plume.fila_snapshot['z'], \
-    #        plume.fila_snapshot['r']*100, scale_factor = 1)
-    # axes and outlines
-    #mlab.axes( xlabel = 'X East (m)', ylabel = 'Y North (m)', \
-    #        zlabel = 'Z Up (m)', ranges = [0, plume.sim_area_size[0], 0, \
-    #        plume.sim_area_size[1], 0, plume.sim_area_size[2]])
-    #mlab.outline(extent=[0, plume.sim_area_size[1], 0, \
-    #        plume.sim_area_size[1], 0, plume.sim_area_size[2]])
+
     while(True):
         plume.plume_update()
-        print 'length of fila = ' + str(len(plume.fila_snapshot))
-        #print 'fila_snapshot = ' + str(plume.fila_snapshot)
-        #p.mlab_source.reset(x=plume.fila_snapshot['x'], y=plume.fila_snapshot['y'], z=plume.fila_snapshot['z'], \
-        #    scalars=plume.fila_snapshot['r'])
+        print 'length of fila = ' + str(len(plume.fila))

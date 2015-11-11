@@ -44,6 +44,8 @@ import srsim_config as Config
 from srsim_loop import SimulationThread
 from srsim_wind import Advection
 from srsim_plume import FilamentModel
+# Robot drawing
+from tvtk.tools import visual
 # for debug
 from sys import exit
 
@@ -86,13 +88,18 @@ class ControlPanel(HasTraits):
     # Wind = Advective flow + Turbulent flow
     # (1) Advective flow
     # Selection of advective flow model
-    enum_advection_model = Enum('uniform','irrotational','ext')
-    # Advection Model 1: uniform advective flow field
-    uniform_advection_vector_x, uniform_advection_vector_y, \
-            uniform_advection_vector_z = Float, Float, Float
-    # Advection Model 2: irrotational, incompressible flow
-    irrotational_advection_mean_x, irrotational_advection_mean_y, \
-            irrotational_advection_mean_z = Float, Float, Float
+    enum_advection_model = Enum('constant', 'uniform', 'irrotational','ext')
+    # Advection Model 1: constant advective flow field
+    #  wind vector at every point is 'advection_mean'
+    # Advection Model 2: uniform advective flow field
+    #  wind vector at every point is the same as 'advection_mean'+stochastic variance
+    # Advection Model 3: irrotational, incompressible flow
+    #  wind vector at every point is different, vectors at vertex points are different
+    #   'advection_mean'+stochastic variance, and vectors at six faces (cuboid flow area)
+    #   are interpolated from vertex vectors (Boundary Conditions). And the rest points are
+    #   calculated via laplacian equation
+    advection_mean_x, advection_mean_y, \
+            advection_mean_z = Float, Float, Float
     wind_colored_noise_g, wind_colored_noise_xi, wind_colored_noise_omega = \
             Float, Float, Float
     # Advection Model 3: load external advection field data
@@ -104,6 +111,11 @@ class ControlPanel(HasTraits):
     fila_release_per_sec = Int
     fila_centerline_dispersion_sigma = Float
     fila_growth_rate = Float
+
+    # ---- Robot tab ----
+    init_robot_pos_x, init_robot_pos_y, \
+            init_robot_pos_z = Float, Float, Float
+
     # ---- Dispay ----
     # simulator running state display
     textbox_sim_state_display = String()
@@ -125,6 +137,8 @@ class ControlPanel(HasTraits):
     # ======== Streamlines ========
     wind_field = Instance(HasTraits)
     odor_field = None
+    odor_source = None # use visual to display a cylinder as the source
+    robot = None # use visual.frame to draw a robot
 
     ###################################
     # ======== Other ========
@@ -165,7 +179,8 @@ class ControlPanel(HasTraits):
                                                 high = '0.1',
                                                 format = '%.2f',
                                                 mode = 'slider'),
-                        label = 'delta t (second)'),
+                        label = 'delta t (second)',
+                        enabled_when = "params_allow_change == True"),
                     HGroup(
                         Item('button_save_camera_angle', \
                                 show_label = False),
@@ -173,7 +188,8 @@ class ControlPanel(HasTraits):
                         editor = BooleanEditor( mapping={
                                                     "on":True,
                                                     "off":False}),
-                        label = 'Scene switch',)),
+                        label = 'Scene switch',
+                        enabled_when = "params_allow_change == True")),
                     Item('button_start_stop_simulation', \
                                 show_label = False),
                     Group(
@@ -187,53 +203,34 @@ class ControlPanel(HasTraits):
                 Group(
                     Item(name = 'enum_advection_model',
                         editor = EnumEditor(values = {
-                            'uniform'       : '1:uniform',
-                            'irrotational'  : '2:irrotational & incompressible',
-                            'ext'           : '3:load external data',}),
+                            'constant'      : '1:Constant Flow (Time Invariant)',
+                            'uniform'       : '2:Uniform Flow (Time Variant)',
+                            'irrotational'  : '3:Irrotational & Incompressible',
+                            'ext'           : '4:Load external data',}),
                         label = 'Advection',
                         style = 'simple'),
                     Group(
-                        Item('uniform_advection_vector_x',
+                        Item('advection_mean_x',
                             editor = RangeEditor(   low = '-10.0',
                                                     high = '10.0',
                                                     format = '%.1f',
                                                     mode = 'slider'),
                             label = 'x (m/s):',),
-                        Item('uniform_advection_vector_y',
+                        Item('advection_mean_y',
                             editor = RangeEditor(   low = '-10.0',
                                                     high = '10.0',
                                                     format = '%.1f',
                                                     mode = 'slider'),
                             label = 'y (m/s):',),
-                        Item('uniform_advection_vector_z',
-                            editor = RangeEditor(   low = '-10.0',
-                                                    high = '10.0',
-                                                    format = '%.1f',
-                                                    mode = 'slider'),
-                            label = 'z (m/s):',),
-                        label = 'Uniform advection vector', show_border=True,
-                        visible_when = "enum_advection_model == 'uniform'"),
-                    Group(
-                        Item('irrotational_advection_mean_x',
-                            editor = RangeEditor(   low = '-10.0',
-                                                    high = '10.0',
-                                                    format = '%.1f',
-                                                    mode = 'slider'),
-                            label = 'x (m/s):',),
-                        Item('irrotational_advection_mean_y',
-                            editor = RangeEditor(   low = '-10.0',
-                                                    high = '10.0',
-                                                    format = '%.1f',
-                                                    mode = 'slider'),
-                            label = 'y (m/s):',),
-                        Item('irrotational_advection_mean_z',
+                        Item('advection_mean_z',
                             editor = RangeEditor(   low = '-10.0',
                                                     high = '10.0',
                                                     format = '%.1f',
                                                     mode = 'slider'),
                             label = 'z (m/s):',),
                         label = 'Mean wind vector', show_border=True,
-                        visible_when = "enum_advection_model == 'irrotational'"),
+                        visible_when = "enum_advection_model == 'irrotational' or \
+                                enum_advection_model == 'uniform' or enum_advection_model == 'constant'"),
                     Group(
                         Item('wind_colored_noise_g',
                             editor = RangeEditor(   low = '0.0',
@@ -254,7 +251,7 @@ class ControlPanel(HasTraits):
                                                     mode = 'slider'),
                             label = 'Bandwidth',),
                     label = 'Stochastic (colored noise) params', show_border=True,
-                    visible_when = "enum_advection_model == 'irrotational'"),
+                    visible_when = "enum_advection_model == 'irrotational' or enum_advection_model == 'uniform'"),
                     label = 'Wind', dock = 'tab',
                     enabled_when = "params_allow_change == True"),
                 # Plume tab
@@ -307,6 +304,29 @@ class ControlPanel(HasTraits):
                         visible_when = "enum_plume_model == 'farrell'"),
                     label = 'Plume', dock = 'tab',
                     enabled_when = "params_allow_change == True"),
+                Group(
+                    Group(
+                        Item('init_robot_pos_x',
+                            editor = RangeEditor(   low = '0.0',
+                                                    high_name = 'area_length',
+                                                    format = '%.1f',
+                                                    mode = 'auto'),
+                            label = 'x (m):',),
+                        Item('init_robot_pos_y',
+                            editor = RangeEditor(   low = '0.0',
+                                                    high_name = 'area_width',
+                                                    format = '%.1f',
+                                                    mode = 'auto'),
+                            label = 'y (m):',),
+                        Item('init_robot_pos_z',
+                            editor = RangeEditor(   low = '0.0',
+                                                    high_name = 'area_height',
+                                                    format = '%.1f',
+                                                    mode = 'auto'),
+                            label = 'z (m):',),
+                        label = 'Robot position (x,y,z) (m)', show_border=True),
+                    label = 'Robot', dock = 'tab',
+                    enabled_when = "params_allow_change == True"),
                 layout = 'tabbed'),
             Item(name = 'textbox_sim_state_display',
                         label = 'Simulator State', show_label=False,
@@ -343,18 +363,11 @@ class ControlPanel(HasTraits):
         model = Config.get_wind_model()
         return model
 
-    def _uniform_advection_vector_x_default(self):
+    def _advection_mean_x_default(self):
         return self.mean_wind_vector[0]
-    def _uniform_advection_vector_y_default(self):
+    def _advection_mean_y_default(self):
         return self.mean_wind_vector[1]
-    def _uniform_advection_vector_z_default(self):
-        return self.mean_wind_vector[2]
-
-    def _irrotational_advection_mean_x_default(self):
-        return self.mean_wind_vector[0]
-    def _irrotational_advection_mean_y_default(self):
-        return self.mean_wind_vector[1]
-    def _irrotational_advection_mean_z_default(self):
+    def _advection_mean_z_default(self):
         return self.mean_wind_vector[2]
 
     def _wind_colored_noise_g_default(self):
@@ -376,6 +389,16 @@ class ControlPanel(HasTraits):
         return pos[1]
     def _init_odor_source_pos_z_default(self):
         pos = Config.get_odor_source_pos()
+        return pos[2]
+
+    def _init_robot_pos_x_default(self):
+        pos = Config.get_robot_init_pos()
+        return pos[0]
+    def _init_robot_pos_y_default(self):
+        pos = Config.get_robot_init_pos()
+        return pos[1]
+    def _init_robot_pos_z_default(self):
+        pos = Config.get_robot_init_pos()
         return pos[2]
 
 
@@ -409,7 +432,6 @@ class ControlPanel(HasTraits):
     # ======== Listening ========
     @on_trait_change('scene.activated')
     def init_scene(self):
-        print 'scece switch = '+str(self.sim_scene_switch)
         # init params of wind model
         l, w, h = np.array(self.grid).shape[1:4] # 1 2 3
         self.wind.xyz_n = [l, w, h]
@@ -421,10 +443,21 @@ class ControlPanel(HasTraits):
         self.wind.wind_damping = cn_p[1]
         self.wind.wind_bandwidth = cn_p[2]
         # init scene
+        #   init wind vector field obj
         self.wind.uniform_tinv()
         u, v, w = self.wind.wind_vector_field
         x, y, z = self.grid
         self.wind_field = self.scene.mlab.quiver3d(x, y, z, u, v, w, reset_zoom=False)
+        #   init odor source pos obj
+        visual.set_viewer(self.scene) # tell visual to use this scene as the viewer
+        op = Config.get_odor_source_pos() # get init odor source pos
+        #self.odor_source = visual.cylinder(pos=(op[0], op[1], 0), axis = (0, 0, 1), \
+        #        length = op[2], radius = 0.1)
+        self.odor_source = visual.box(pos=(op[0], op[1], op[2]/2.0), length = 0.1, \
+                height = 0.1, width = op[2], color = (0x05/255.0, 0x5f/255.0,0x58/255.0), )
+        #   init robot obj
+        rp = Config.get_robot_init_pos()
+        self.func_init_robot_shape(rp)
         # axes and outlines
         self.func_init_axes_outline()
         # camera view
@@ -461,29 +494,24 @@ class ControlPanel(HasTraits):
         # save sim dt to global settings
         Config.set_dt(self.sim_dt)
 
-    @on_trait_change('enum_advection_model, uniform_advection_vector_x, \
-            uniform_advection_vector_y, uniform_advection_vector_z, \
-            irrotational_advection_mean_x, irrotational_advection_mean_y, \
-            irrotational_advection_mean_z')
+    @on_trait_change('enum_advection_model')
     def change_advection_model_selection(self):
-        if self.enum_advection_model == 'uniform':
-            self.mean_wind_vector = self.uniform_advection_vector_x,\
-                self.uniform_advection_vector_y, self.uniform_advection_vector_z
-            #save mean wind vector setting to global settings
-            Config.set_mean_wind_vector(list(self.mean_wind_vector))
-        elif self.enum_advection_model == 'irrotational':
-            self.mean_wind_vector = self.irrotational_advection_mean_x,\
-                self.irrotational_advection_mean_y, self.irrotational_advection_mean_z
-            #save mean wind vector setting to global settings
-            Config.set_mean_wind_vector(list(self.mean_wind_vector))
+        # save selection to global settings
+        Config.set_wind_model(self.enum_advection_model)
+
+    @on_trait_change('advection_mean_x, advection_mean_y, \
+            advection_mean_z')
+    def change_advection_mean_vector(self):
+        self.mean_wind_vector = self.advection_mean_x,\
+                self.advection_mean_y, self.advection_mean_z
+        #save mean wind vector setting to global settings
+        Config.set_mean_wind_vector(list(self.mean_wind_vector))
         # update self.wind.mean_flow
         self.wind.mean_flow = list(self.mean_wind_vector)
         # draw wind vector field
         self.wind.uniform_tinv()
         u, v, w = self.wind.wind_vector_field
         self.wind_field.mlab_source.set(u=u, v=v, w=w)
-        # save selection to global settings
-        Config.set_wind_model(self.enum_advection_model)
 
     @on_trait_change('wind_colored_noise_g, wind_colored_noise_xi, wind_colored_noise_omega')
     def change_wind_colored_noise_params(self):
@@ -496,12 +524,21 @@ class ControlPanel(HasTraits):
 
     @on_trait_change('init_odor_source_pos_x, init_odor_source_pos_y, init_odor_source_pos_z')
     def change_init_odor_source_pos(self):
-        # change odor source position
+        # change the pos of odor source obj
         x, y, z = self.init_odor_source_pos_x,\
                 self.init_odor_source_pos_y, self.init_odor_source_pos_z
+        self.odor_source.pos = (x, y, z/2.0)
+        self.odor_source.width = z
         # save pos setting to global settings
-        Config.set_odor_source_pos([self.init_odor_source_pos_x,\
-                self.init_odor_source_pos_y, self.init_odor_source_pos_z])
+        Config.set_odor_source_pos([x, y, z])
+
+    @on_trait_change('init_robot_pos_x, init_robot_pos_y, init_robot_pos_z')
+    def change_init_robot_pos(self):
+        # change the pos of robot obj
+        x, y, z = self.init_robot_pos_x, self.init_robot_pos_y, self.init_robot_pos_z
+        self.robot.pos = (x, y, z)
+        # save pos setting to global settings
+        Config.set_robot_init_pos([x, y, z])
 
     @on_trait_change('fila_release_per_sec, fila_centerline_dispersion_sigma, fila_growth_rate')
     def change_farrell_params(self):
@@ -523,7 +560,7 @@ class ControlPanel(HasTraits):
             # disable area size changing item (GUI)
             self.params_allow_change = False
             # check if need re-init scene
-            if self.sim_thread != None:
+            if self.sim_thread: # if sim_thread != None, i.e., if sim_thread once excecuted
                 # re-init scene
                 self.odor_field.remove()
                 self.wind_field.remove()
@@ -613,13 +650,30 @@ class ControlPanel(HasTraits):
         self.scene.mlab.outline(extent=[0, self.area_length, 0,
             self.area_width, 0, self.area_height],)
 
+    # init robot shape drawing
+    def func_init_robot_shape(self, robot_pos):
+        # draw 4 propellers
+        d = 0.145 # diameter of propeller is 14.5 cm
+        w = 0.16 # wheelbase is 16 cm (shortest distance between centers of two adjacent propellers)
+        p1 = visual.ring(frame=self.robot, pos=(w/2.0, w/2.0, 0), axis = (0, 0, 1), \
+                radius = d/2.0, thickness = 0.01, color = (1.0, 0, 0)) # Red
+        p2 = visual.ring(frame=self.robot, pos=(w/2.0, -w/2.0, 0), axis = (0, 0, 1), \
+                radius = d/2.0, thickness = 0.01, color = (0, 0, 1.0)) # Blue
+        p3 = visual.ring(frame=self.robot, pos=(-w/2.0, -w/2.0, 0), axis = (0, 0, 1), \
+                radius = d/2.0, thickness = 0.01, color = (0, 0, 1.0)) # Blue
+        p4 = visual.ring(frame=self.robot, pos=(-w/2.0, w/2.0, 0), axis = (0, 0, 1), \
+                radius = d/2.0, thickness = 0.01, color = (1.0, 0, 0)) # Red
+        # robot shape is a frame composites different objects
+        self.robot = visual.frame(p1, p2, p3, p4)
+        self.robot.pos = (robot_pos[0], robot_pos[1], robot_pos[2])
+
     # update scene
     def func_update_scene(self):
         # update wind field display
         u, v, w = self.sim_thread.wind_vector_field
         self.wind_field.mlab_source.set(u=u, v=v, w=w)
         # update odor field display
-        fila = self.sim_thread.plume.fila_snapshot
+        fila = self.sim_thread.plume_snapshot
         # update obj
         self.odor_field.mlab_source.reset(x=fila['x'], y=fila['y'], z=fila['z'], scalars=fila['r']*50)
         self.odor_field.mlab_source.set(x=fila['x']) # to trig display refresh
