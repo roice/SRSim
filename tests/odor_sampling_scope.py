@@ -3,8 +3,8 @@ Odor sensor sampling value dynamically plot
 """
 import time
 import numpy as np
-#import matplotlib
-#matplotlib.use('TkAgg')
+import matplotlib
+matplotlib.use('Qt4Agg')
 import matplotlib.pyplot as plt
 
 # sensor reading plot
@@ -70,10 +70,14 @@ class SensorPlot:
 # Tweak spacing to prevent clipping of ylabel
 #plt.subplots_adjust(left=0.15)
 
-plot = SensorPlot('odor')
-plot.init()
-data = [0,0]
-while True:
-    data[0] += 0.1
-    data[1] += 0.1
-    plot.update(data)
+
+##############################################################################
+# Execute if running this script
+if __name__ == '__main__':
+    plot = SensorPlot('odor')
+    plot.init()
+    data = [0,0]
+    while True:
+        data[0] += 0.1
+        data[1] += 0.1
+        plot.update(data)
