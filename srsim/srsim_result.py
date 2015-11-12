@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 #
 # sniffer robots simulator
-#                        Plotting module
+#                        Result plotting module
 #
 # Author: Roice Luo <oroice@foxmail.com>
 # copyright (c) 2015 Roice Luo <https://github.com/roice>
@@ -21,7 +21,7 @@
 # along with this library; if not, write to the Free Software Foundation,
 # Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA
 
-'''srsim plotting module
+'''srsim result plotting module
    plot sensor reading, algorithm results...
 
 Documentation and tests are included in ...
@@ -45,7 +45,13 @@ class SensorPlot:
         }
     # === Params input from outside
     # sample data, refreshed every sample interval
-    #   sample: [time, value]
+    #   type: multiprocessing shared state
+    #         <SynchronizedArray wrapper for <multiprocessing.sharedctypes.c_float_Array_2 object...
+    #   content: [time, value], self.sample[:] == [time, value]
+    # how to get value?
+    # right way 1: self.sample[0] or self.sample[1]
+    # right way 2: self.sample[:]
+    # wrong way:   X = self.sample, or self.sample = X..list
     sample = None
 
     # === Params for internal data exchanging
@@ -64,13 +70,12 @@ class SensorPlot:
     #  it's 'update' function's job to judge whether to plot it
     def sampling(self):
         while True:
-            print 'sample = ' + str(self.sample)
             sample = self.sample
             yield sample
 
     # displays dynamically a certain period of reading
-    def init(self, arr):
-        self.sample = arr
+    def init(self, shared_mem):
+        self.sample = shared_mem
         # 1 subplot
         fig, self.ax = plt.subplots()
         # subplot, plot a certain period of reading
@@ -80,13 +85,12 @@ class SensorPlot:
             self.ax.set_xlabel('time (s)', fontdict=self.label_font)
             self.ax.set_ylabel('Concentration ()', fontdict=self.label_font)
         ani = animation.FuncAnimation(fig, self.update, self.sampling,\
-                blit=False, interval=100, repeat=False)
+                blit=False, interval=10, repeat=False)
         plt.show()
 
     # update plots
     # reading is a list containing 2 float, [time, concentration]
     def update(self, reading):
-        #print 'reading = ' + str(reading)
         # check if this is a new data
         #   reading: sample: [time, value]
         #   if the time value in this reading is not equal to the latest time
@@ -97,13 +101,24 @@ class SensorPlot:
             if len(self.data) > 100: # 100 reading
                 del self.data[0]
             # change axes limits of plots
-            self.ax.set_xlim(float(min(self.data[:][0])), \
-                    float(max(self.data[:][0])))
-            self.ax.set_ylim(float(min(self.data[:][0])), \
-                    float(max(self.data[:][0])))
+            self.ax.set_xlim(float(min(np.array(self.data)[:,0])), \
+                    float(max(np.array(self.data)[:,0])))
+            self.ax.set_ylim(float(min(np.array(self.data)[:,0])), \
+                    float(max(np.array(self.data)[:,0])))
             # change data streamline
-            self.plot.set_xdata(self.data[:][0])
-            self.plot.set_ydata(self.data[:][0])
+            self.plot.set_xdata(np.array(self.data)[:,0])
+            self.plot.set_ydata(np.array(self.data)[:,0])
+
+    def start(self):
+        # Although it's not safe to use shared states, but there's no choice
+        data = multiprocessing.Array('f', [0.,0.])
+        # create child process for plotting
+        plot_process = multiprocessing.Process(target=self.init, args=([data]))
+        # link data obj to self.sample in this (parent) instance, Note: it's different from
+        #   the sample attribute of child process's target self.init, while linking data to
+        #   this self.sample made data obj being changeable by changing self.sample
+        self.sample = data
+        plot_process.start()
 
 #plt.text(2, 0.65, r'$\cos(2 \pi t) \exp(-t)$', fontdict=font)
 
@@ -114,18 +129,11 @@ class SensorPlot:
 ##############################################################################
 # Execute if running this script
 if __name__ == '__main__':
-    def data_gen():
-        for i in range(100):
-            data[0] += 0.1
-            data[1] += 0.1
-            #plot.sample = data
-            sleep(0.1)
-    plot = SensorPlot('odor')
-    data = multiprocessing.Array('f', [0,0])
-    print 'data = '+str(data)
-    # create a child process to do plotting job
-    plot_process = multiprocessing.Process(target=plot.init, args=(data))
-    plot_process.start()
-
-    print 'generate data'
-    data_gen()
+    p = SensorPlot('odor')
+    p.start()
+    a = [0.,0.]
+    for i in range(100):
+        a[0] += 0.1
+        a[1] += 0.1
+        p.sample[:] = a
+        sleep(0.1)
