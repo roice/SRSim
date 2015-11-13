@@ -29,23 +29,27 @@ Documentation and tests are included in ...
 from threading import Thread
 from time import sleep
 from pyface.api import GUI
-import gc
+from srsim_result import ResultPlot
+import multiprocessing
 
 class SimulationThread(Thread):
     ''' Simulation loop.
     '''
-    # flag indicating whether to abort sim
-    wants_abort = False
-
-    # params converted from outside
+    # === Init params configured from outside
+    sim_dt = None # simulation dtime
     wind_model = None # wind model selection
-    count_sime_step = None
-    update_scene = None
-    display = None # print text to outside item
+    count_sim_step = None # sim step count function in srsim_ui.py
+    update_scene = None # update scene signal, srsim_ui.py
+    display = None # print text to outside item in srsim_ui.py
     wind = None # instance of wind field calculation class
     plume = None # instance of plume calculation class
     robot = None # instance of robot navigation class
 
+    # === Params input from outside
+    # flag indicating whether to abort sim
+    wants_abort = False
+
+    # === Params output to outside
     # data for outside display
     wind_vector_field = None
     plume_snapshot = None
@@ -53,7 +57,6 @@ class SimulationThread(Thread):
     def run(self):
         ''' Runs the simulation loop
         '''
-
         # Reset simulation step
         sim_step = 0
         # Init simulation
@@ -61,6 +64,13 @@ class SimulationThread(Thread):
         self.wind.wind_init(self.wind_model)
         #  Init plume field
         self.plume.plume_init()
+        #  Init robot control
+        self.robot.sim_dt = self.sim_dt # for sensor plot
+        self.robot.robot_init()
+        #  Init result plotting
+        self.result_process = multiprocessing.Process(target=ResultPlot, \
+                args=([['odor','fuckyou']]))
+        self.result_process.start()
         while not self.wants_abort:
             sim_step += 1
             # Update wind field

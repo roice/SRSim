@@ -25,24 +25,50 @@
 
 Documentation and tests are included in ...
 '''
+from srsim_result import SensorPlot
 
 # single robot
 class Robot:
+    # === Init params configured from outside
+    sim_dt = None # simulation dtime
+    switch_sensor_plot = None # whether to plot sensor reading
+
     # === Params input from outside
     odor_sampling = None # odor sampling routine
 
     # === Params for exchanging data internally
+    sim_step = None # for simulation step counting
 
     # === Params output
     # robot position
     robot_pos = None
 
-    #def robot_init(self):
+    def __init__(self):
+        # clear sim step count
+        self.sim_step = 0
+        # default plot sensor reading
+        self.switch_sensor_plot = True
+
+    def robot_init(self):
+        # clear sim step count
+        self.sim_step = 0
         # set robot position
+        # plot sensor reading
+        if self.switch_sensor_plot:
+            self.plot_odor_sensor = SensorPlot('odor')
+            #self.plot_odor_sensor.start_plot()
 
     def robot_update(self):
+        # count sim step
+        self.sim_step += 1
         # odor concentration value sampling
         odor_conc = self.odor_sampling(self.robot_pos)
+        # plot sensor reading
+        '''
+        if self.switch_sensor_plot and self.plot_odor_sensor:
+            self.plot_odor_sensor.sample[:] = \
+                    [self.sim_step*self.sim_dt, odor_conc]
+        '''
 
 # multiple robots
 class Robots:

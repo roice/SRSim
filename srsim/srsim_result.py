@@ -28,6 +28,8 @@ Documentation and tests are included in ...
 '''
 
 import numpy as np
+import matplotlib
+matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 # for exception
@@ -35,6 +37,7 @@ from sys import exit
 # for debug
 from time import sleep
 import multiprocessing
+
 # sensor reading plot
 class SensorPlot:
     # font type
@@ -46,7 +49,8 @@ class SensorPlot:
     # === Params input from outside
     # sample data, refreshed every sample interval
     #   type: multiprocessing shared state
-    #         <SynchronizedArray wrapper for <multiprocessing.sharedctypes.c_float_Array_2 object...
+    #         <SynchronizedArray wrapper for
+    #           <multiprocessing.sharedctypes.c_float_Array_2 object...
     #   content: [time, value], self.sample[:] == [time, value]
     # how to get value?
     # right way 1: self.sample[0] or self.sample[1]
@@ -56,6 +60,7 @@ class SensorPlot:
 
     # === Params for internal data exchanging
     data = None # a list
+    len_recent_display = 10 # display recent 100 samples on the 1st subplot
 
     def __init__(self, sensor_type):
         # check if valid sensor type is choosen
@@ -76,14 +81,24 @@ class SensorPlot:
     # displays dynamically a certain period of reading
     def init(self, shared_mem):
         self.sample = shared_mem
-        # 1 subplot
-        fig, self.ax = plt.subplots()
-        # subplot, plot a certain period of reading
-        self.plot, = self.ax.plot(self.data[0])
+        # 2 subplot
+        fig, self.ax = plt.subplots(2)
+        # 2 subplot
+        #   1st subplot: plot a certain period of reading
+        #   2nd subplot: plot all reading from the epoch
+        self.plot_1, = self.ax[0].plot(self.data[0], color='g', linewidth=2)
+        self.plot_2, = self.ax[1].plot(self.data[0], color='b', linewidth=2)
+        # display label/title according to sensor type
         if self.sensor == 'odor': # an odor sensor
-            self.ax.set_title('Odor sensor reading', fontdict=self.label_font)
-            self.ax.set_xlabel('time (s)', fontdict=self.label_font)
-            self.ax.set_ylabel('Concentration ()', fontdict=self.label_font)
+            self.ax[0].set_title('Recent odor sensor reading', \
+                    fontdict=self.label_font)
+            self.ax[1].set_title('Odor sensor reading from epoch', \
+                    fontdict=self.label_font)
+            self.ax[1].set_xlabel('time (s)', fontdict=self.label_font)
+            plt.ylabel('Concentration ('+r'$\frac{molecules}{cm^3}$'+')', \
+                    fontdict=self.label_font)
+        # Tweak spacing to prevent clipping of ylabel
+        plt.subplots_adjust(left=0.15)
         ani = animation.FuncAnimation(fig, self.update, self.sampling,\
                 blit=False, interval=10, repeat=False)
         plt.show()
@@ -98,42 +113,73 @@ class SensorPlot:
         if reading and reading[0] != self.data[len(self.data)-1][0]:
             # update reading list
             self.data.append([reading[0], reading[1]])
-            if len(self.data) > 100: # 100 reading
-                del self.data[0]
-            # change axes limits of plots
-            self.ax.set_xlim(float(min(np.array(self.data)[:,0])), \
+            # update the data & axis limit of 1st subplot
+            N = len(self.data)
+            if N > self.len_recent_display: # recent data reading
+                self.plot_1.set_xdata(np.array(self.data)\
+                        [N-self.len_recent_display:N,0])
+                self.plot_1.set_ydata(np.array(self.data)\
+                        [N-self.len_recent_display:N,1])
+                self.ax[0].set_xlim(float(min(np.array(self.data)\
+                        [N-self.len_recent_display:N,0])), \
+                        float(max(np.array(self.data)\
+                        [N-self.len_recent_display:N,0])))
+                self.ax[0].set_ylim(float(min(np.array(self.data)\
+                        [N-self.len_recent_display:N,1])), \
+                        float(max(np.array(self.data)\
+                        [N-self.len_recent_display:N,1])))
+            else:
+                self.plot_1.set_xdata(np.array(self.data)[:,0])
+                self.plot_1.set_ydata(np.array(self.data)[:,1])
+                self.ax[0].set_xlim(float(min(np.array(self.data)[:,0])), \
                     float(max(np.array(self.data)[:,0])))
-            self.ax.set_ylim(float(min(np.array(self.data)[:,0])), \
+                self.ax[0].set_ylim(float(min(np.array(self.data)[:,1])), \
+                    float(max(np.array(self.data)[:,1])))
+            # update the data & axis limit of 1st subplot
+            self.plot_2.set_xdata(np.array(self.data)[:,0])
+            self.plot_2.set_ydata(np.array(self.data)[:,1])
+            self.ax[1].set_xlim(float(min(np.array(self.data)[:,0])), \
                     float(max(np.array(self.data)[:,0])))
-            # change data streamline
-            self.plot.set_xdata(np.array(self.data)[:,0])
-            self.plot.set_ydata(np.array(self.data)[:,0])
+            self.ax[1].set_ylim(float(min(np.array(self.data)[:,1])), \
+                    float(max(np.array(self.data)[:,1])))
 
-    def start(self):
+    def start_plot(self):
         # Although it's not safe to use shared states, but there's no choice
         data = multiprocessing.Array('f', [0.,0.])
         # create child process for plotting
-        plot_process = multiprocessing.Process(target=self.init, args=([data]))
-        # link data obj to self.sample in this (parent) instance, Note: it's different from
-        #   the sample attribute of child process's target self.init, while linking data to
-        #   this self.sample made data obj being changeable by changing self.sample
+        self.plot_process = multiprocessing.Process(target=self.init,\
+                args=([data]))
+        # link data obj to self.sample in this (parent) instance,
+        # Note: it's different from the sample attribute of child process's
+        #  target self.init, while linking data to this self.sample made data
+        #  obj being changeable by changing self.sample
         self.sample = data
-        plot_process.start()
+        self.plot_process.start()
 
-#plt.text(2, 0.65, r'$\cos(2 \pi t) \exp(-t)$', fontdict=font)
+    def close_plot(self):
+        print 'now close plot'
+        self.plot_process.join()
+        print 'closed'
 
-# Tweak spacing to prevent clipping of ylabel
-#plt.subplots_adjust(left=0.15)
-
+# Result Plot function
+#  input params:
+#    sensor: a sensor type list, ['odor', ...]
+def ResultPlot(sensor):
+    for name in sensor:
+        if name == 'odor': # plot odor sensor
+            print 'plot odor sensor'
+            p = SensorPlot('odor')
+            p.start_plot()
 
 ##############################################################################
 # Execute if running this script
 if __name__ == '__main__':
     p = SensorPlot('odor')
-    p.start()
+    p.start_plot()
     a = [0.,0.]
     for i in range(100):
         a[0] += 0.1
         a[1] += 0.1
         p.sample[:] = a
         sleep(0.1)
+    p.close_plot()

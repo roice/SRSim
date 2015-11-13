@@ -597,11 +597,12 @@ class ControlPanel(HasTraits):
             self.sim_thread = SimulationThread()
             # sim visual update function
             self.sim_thread.update_scene = self.func_event_update_scene
-            # sim step count function
-            self.sim_thread.count_sim_step = self.func_sim_step_count
-            # clear count
+            # clear sim step/time count
             self.text_sim_step_count = 0
             self.text_sim_time_count = '0.0 s'
+            # sim step count function
+            self.sim_thread.count_sim_step = self.func_sim_step_count
+            self.sim_thread.sim_dt = self.sim_dt # for sim thread use to calculate sim time
             # sim textbox state display function
             self.sim_thread.display = self.add_text_line
             # wind sim instance
@@ -662,7 +663,7 @@ class ControlPanel(HasTraits):
         # count sim step
         self.text_sim_step_count += 1
         # count sim time
-        self.text_sim_time_count = '%.1f s' %(self.text_sim_step_count*self.sim_dt)
+        self.text_sim_time_count = '%.2f s' %(self.text_sim_step_count*self.sim_dt)
 
     # draw axes & outlines on current scene
     def func_init_axes_outline(self):

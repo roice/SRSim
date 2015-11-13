@@ -27,6 +27,17 @@ Documentation and tests are included in ...
 '''
 
 from srsim_ui import MainWindow
+from srsim_result import ResultPlot
+import multiprocessing
 
-mainwin = MainWindow()
-mainwin.configure_traits()
+def SRsimUI():
+    mainwin = MainWindow()
+    mainwin.configure_traits()
+
+def SRsimPlot(sensor):
+    ResultPlot(sensor)
+
+ui = multiprocessing.Process(target=SRsimPlot, args=([['odor', 'fuckyou']]))
+plot = multiprocessing.Process(target=SRsimUI, args=([]))
+ui.start()
+plot.start()
