@@ -41,9 +41,9 @@ class CommServer:
                 or self.shared_sim_state is None:
             exit('Comm server: data channel have not been configured yet!')
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind(('localhost', 8001))
+        sock.bind(('localhost', 60000))
         sock.listen(1) # permit only one connection
-        print "SRsim server is listenting port 8001 of address: " + 'localhost'
+        print "SRsim server is listenting port 6000 of address: " + 'localhost'
         while True:
             # wait for client
             connection,address = sock.accept()

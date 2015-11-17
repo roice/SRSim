@@ -46,7 +46,7 @@ class CommClient:
             try:
                 # create connection
                 connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                connection.connect(('localhost', 8001))
+                connection.connect(('localhost', 60000))
                 # connection established, request for odor value
                 connection.send('$SRsim>odor_sample')
                 str_recv = connection.recv(1024)
