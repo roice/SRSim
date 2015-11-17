@@ -68,6 +68,7 @@ class ControlPanel(HasTraits):
     right panel of the application, and it hosts the method for interaction
     between the objects and the GUI.
     '''
+
     ###################################
     # ======== Panel GUI ========
     # bool switch, to enable/disable params changing
@@ -567,6 +568,8 @@ class ControlPanel(HasTraits):
             self.sim_thread.wants_abort = True
             # enable area size changing item (GUI)
             self.params_allow_change = True
+            # update sim state indicator, tell communication process the sim will end
+            self.objs_comm_process['sim_state'][0] = 0
         else:
             # disable area size changing item (GUI)
             self.params_allow_change = False
@@ -633,6 +636,10 @@ class ControlPanel(HasTraits):
             self.robot.robot_pos = [self.init_robot_pos_x, self.init_robot_pos_y, self.init_robot_pos_z]
             #  odor sampling routine
             self.robot.odor_sampling = self.sim_thread.plume.odor_conc_value_sampling
+            #  communication process objs, including process handle, queues
+            self.robot.objs_comm_process = self.objs_comm_process
+            # update sim state indicator, tell communication process the sim is starting
+            self.objs_comm_process['sim_state'][0] = 1
             # start simulation thread
             self.sim_thread.start()
 
@@ -733,7 +740,12 @@ class MainWindowHandler(Handler):
             info.object.panel.sim_thread.wants_abort = True
             while info.object.panel.sim_thread.isAlive():
                 sleep(0.1)
-        # save settings to file settings.cfg`
+        # close communication process
+        if info.object.panel.objs_comm_process['process']:
+            info.object.panel.objs_comm_process['process'].terminate()
+            info.object.panel.objs_comm_process['process'].join()
+        print 'SRsim: Simulation thread & comm process closed'
+        # save settings to file settings.cfg
         Config.save_settings()
         return True
 
@@ -748,6 +760,16 @@ class MainWindow(HasTraits):
     # control panel
     panel = Instance(ControlPanel)
 
+    # === Params configured from outside
+    # communication process
+    comm_process = None
+    # odor sampling queue
+    queue_odor_sample = None
+    # robot navigation waypoint queue
+    queue_robot_waypoint = None
+    # simulation state indicator
+    shared_sim_state = None
+
     ##################################
     # Trait handlers
 
@@ -757,7 +779,12 @@ class MainWindow(HasTraits):
         # load settings from file settings.cfg
         Config.load_settings()
         # pass self.scene to control panel
-        return ControlPanel(scene = self.scene)
+        # pass communication related objs to panel
+        return ControlPanel(scene = self.scene, objs_comm_process = {\
+                'process': self.comm_process, \
+                'odor_sample': self.queue_odor_sample, \
+                'robot_waypoint': self.queue_robot_waypoint, \
+                'sim_state': self.shared_sim_state})
 
     ##################################
     # The UI view to show the user

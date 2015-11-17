@@ -29,7 +29,6 @@ Documentation and tests are included in ...
 from threading import Thread
 from time import sleep
 from pyface.api import GUI
-from srsim_result import ResultPlot
 import multiprocessing
 
 class SimulationThread(Thread):
@@ -67,10 +66,6 @@ class SimulationThread(Thread):
         #  Init robot control
         self.robot.sim_dt = self.sim_dt # for sensor plot
         self.robot.robot_init()
-        #  Init result plotting
-        self.result_process = multiprocessing.Process(target=ResultPlot, \
-                args=([['odor','fuckyou']]))
-        self.result_process.start()
         while not self.wants_abort:
             sim_step += 1
             # Update wind field
