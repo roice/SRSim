@@ -32,6 +32,7 @@ import time
 # SRsim
 from srsim_ui import MainWindow
 from comm_server import CommServer
+import srsim_config
 
 def SRsimUI(communication_p, q_odor_sample, q_robot_waypoint, sh_sim_state):
     mainwin = MainWindow()
@@ -41,9 +42,12 @@ def SRsimUI(communication_p, q_odor_sample, q_robot_waypoint, sh_sim_state):
     mainwin.shared_sim_state = sh_sim_state
     mainwin.configure_traits()
 
-def communication(q_odor_value, q_robot_waypoint, sh_sim_state):
+def communication(q_odor_value, q_robot_waypoint, sh_sim_state, mode, address, port):
     # create communication server
     comm = CommServer()
+    comm.mode = mode
+    comm.address = address
+    comm.port = port
     comm.queue_odor_sample = q_odor_value
     comm.queue_robot_waypoint = q_robot_waypoint
     comm.shared_sim_state = sh_sim_state
@@ -66,9 +70,12 @@ queue_robot_waypoint = multiprocessing.Queue(maxsize=1) # input robot waypoints
 #             if value is -1:   seems suddenly stopped
 shared_sim_state = multiprocessing.Array('i', [0, -1, 0])
 
+# get address & port number from config
+srsim_config.load_settings()
 # create communication process
 comm_process = multiprocessing.Process(target=communication, args=(\
-        queue_odor_sample, queue_robot_waypoint, shared_sim_state))
+        queue_odor_sample, queue_robot_waypoint, shared_sim_state, \
+        srsim_config.get_comm_mode(), srsim_config.get_comm_address(), srsim_config.get_comm_port()))
 comm_process.start()
 # transfer process handle and queues to SRsim GUI
 SRsimUI(comm_process, queue_odor_sample, queue_robot_waypoint, shared_sim_state)

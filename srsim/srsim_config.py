@@ -39,6 +39,11 @@ class Settings:
     # sim time interval
     dt = 'None'
 
+    # [communication]
+    comm_mode = 'None'
+    comm_addr = 'None'
+    comm_port = 'None'
+
     # [wind]
     # wind model
     wind_model = 'None'
@@ -78,6 +83,20 @@ def set_dt(dt):
     Settings.dt = dt
 def get_dt():
     return Settings.dt
+
+def set_comm_mode(string):
+    Settings.comm_mode = string
+def get_comm_mode():
+    return Settings.comm_mode
+
+def set_comm_address(string):
+    Settings.comm_addr = string
+def get_comm_address():
+    return Settings.comm_addr
+def set_comm_port(string):
+    Settings.comm_port = string
+def get_comm_port():
+    return Settings.comm_port
 
 def set_wind_model(name):
     Settings.wind_model = name
@@ -126,6 +145,9 @@ def load_settings():
     Settings.sim_area_size = cp.get('setup', 'sim_area_size')
     Settings.odor_source_pos = cp.get('setup', 'odor_source_pos')
     Settings.dt = cp.getfloat('setup', 'dt')
+    Settings.comm_mode = cp.get('communication', 'comm_mode')
+    Settings.comm_addr = cp.get('communication', 'comm_addr')
+    Settings.comm_port = cp.get('communication', 'comm_port')
     Settings.wind_model = cp.get('wind', 'wind_model')
     Settings.wind_grid_size = cp.getfloat('wind', 'wind_grid_size')
     Settings.mean_wind_vector = cp.get('wind', 'mean_wind_vector')
@@ -146,6 +168,9 @@ def save_settings():
     cp.set('setup', 'sim_area_size', Settings.sim_area_size)
     cp.set('setup', 'odor_source_pos', Settings.odor_source_pos)
     cp.set('setup', 'dt', str(Settings.dt))
+    cp.set('communication', 'comm_mode', Settings.comm_mode)
+    cp.set('communication', 'comm_addr', Settings.comm_addr)
+    cp.set('communication', 'comm_port', Settings.comm_port)
     cp.set('wind', 'wind_model', Settings.wind_model)
     cp.set('wind', 'wind_grid_size', str(Settings.wind_grid_size))
     cp.set('wind', 'mean_wind_vector', Settings.mean_wind_vector)

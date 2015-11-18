@@ -34,6 +34,9 @@ class CommServer:
     queue_odor_sample = None
     queue_robot_waypoint = None
     shared_sim_state = None
+    mode = None
+    address = None
+    port = None
 
     def start(self):
         # check if right data channels have been configured
@@ -41,9 +44,16 @@ class CommServer:
                 or self.shared_sim_state is None:
             exit('Comm server: data channel have not been configured yet!')
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind(('localhost', 60000))
+        # determine the address and port
+        if self.mode == 'local':
+            sock.bind(('localhost', 60000))
+            print "SRsim server is listenting port 6000 of address: " + 'localhost'
+        elif self.mode == 'distributed':
+            sock.bind((self.address, self.port))
+            print "SRsim server is listenting port " + self.port + " of address: " + self.address
+        else:
+            exit('Comm server: Do you run srsim & algorithm on a same computer or not?')
         sock.listen(1) # permit only one connection
-        print "SRsim server is listenting port 6000 of address: " + 'localhost'
         # tell main process the address&port sucessfully bind
         self.shared_sim_state[1] = 1
         while True:

@@ -83,6 +83,14 @@ class ControlPanel(HasTraits):
     text_sim_time_count = String
     # button for camera info saving
     button_save_camera_angle = Button("Save camera angle")
+    # select local/distributed communication
+    #  local: srsim & algorithm plat are running on a same machine
+    #  distributed: srsim & algorithm plat are running on different machines
+    enum_comm_mode = Enum('local', 'distributed')
+    # communication address
+    text_comm_address = String
+    # communication port
+    text_comm_port = String
 
     # ---- Wind tab ----
     # Wind = Advective flow + Turbulent flow
@@ -202,6 +210,24 @@ class ControlPanel(HasTraits):
                         label = 'Simulation Step /& Time', show_border=True),
                     Item('button_start_stop_simulation', \
                                 show_label = False),
+                    Group(
+                        Item(name = 'enum_comm_mode',
+                        editor = EnumEditor(values = {
+                            'local'         : '1:Local: 1 machine',
+                            'distributed'   : '2:Distributed: 2 machines',}),
+                        label = 'Communication',
+                        style = 'simple'),
+                        Item('text_comm_address',
+                            editor = TextEditor(    auto_set = True,
+                                                    enter_set = True),
+                            label = 'Address to bind', style = 'simple',
+                            enabled_when = "enum_comm_mode == 'distributed'"),
+                        Item('text_comm_port',
+                            editor = TextEditor(    auto_set = True,
+                                                    enter_set = True),
+                            label = 'Port to bind', style = 'simple',
+                            enabled_when = "enum_comm_mode == 'distributed'"),
+                        label = 'Communication (Note: NEED REBOOT)', show_border=True),
                     label = 'Control', dock = 'tab'),
                 # Wind tab
                 Group(
@@ -364,6 +390,16 @@ class ControlPanel(HasTraits):
     def _params_allow_change_default(self):
         return True
 
+    def _enum_comm_mode_default(self):
+        mode = Config.get_comm_mode()
+        return mode
+    def _text_comm_address_default(self):
+        addr = Config.get_comm_address()
+        return addr
+    def _text_comm_port_default(self):
+        port = Config.get_comm_port()
+        return port
+
     def _enum_advection_model_default(self):
         model = Config.get_wind_model()
         return model
@@ -458,9 +494,21 @@ class ControlPanel(HasTraits):
         self.scene.mlab.view(*Config.get_camera_view())
         # check if TCP/IP address/port is successfully bind
         if self.objs_comm_process['sim_state'][1] == 1:
-            self.textbox_sim_state_display = 'Listenting to localhost:60000'
+            if self.enum_comm_mode == 'local':
+                self.textbox_sim_state_display = 'Listenting to localhost:60000'
+            elif self.enum_comm_mode == 'distributed':
+                self.textbox_sim_state_display = 'Listenting to ' \
+                        + self.text_comm_address + ':' + self.text_comm_port
+            else:
+                self.textbox_sim_state_display = "Listenting to what? I don't know"
         elif self.objs_comm_process['sim_state'][1] == -1:
-            self.textbox_sim_state_display = 'Error: Cannot bind localhost:60000'
+            if self.enum_comm_mode == 'local':
+                self.textbox_sim_state_display = 'Error: Cannot bind localhost:60000'
+            elif self.enum_comm_mode == 'distributed':
+                self.textbox_sim_state_display = 'Error: Cannot bind ' \
+                        + self.text_comm_address + ':' + self.text_comm_port
+            else:
+                self.textbox_sim_state_display = "Error: Can't bind what? I forgot"
 
     @on_trait_change('area_length, area_width, area_height')
     def change_area_size(self):
@@ -480,6 +528,18 @@ class ControlPanel(HasTraits):
     def change_dt(self):
         # save sim dt to global settings
         Config.set_dt(self.sim_dt)
+
+    @on_trait_change('enum_comm_mode')
+    def change_comm_mode(self):
+        Config.set_comm_mode(self.enum_comm_mode)
+
+    @on_trait_change('text_comm_address')
+    def change_comm_address(self):
+        Config.set_comm_address(self.text_comm_address)
+
+    @on_trait_change('text_comm_port')
+    def change_comm_port(self):
+        Config.set_comm_port(self.text_comm_port)
 
     @on_trait_change('enum_advection_model')
     def change_advection_model_selection(self):
