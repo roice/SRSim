@@ -65,11 +65,24 @@ class Robot:
             # send to communication process via queue
             self.objs_comm_process['odor_sample'].put(\
                 [self.sim_step*self.sim_dt, odor_conc], block=True, timeout=5)
-            waypoint = self.objs_comm_process['robot_waypoint'].get(block=True)
+            waypoint = self.objs_comm_process['robot_waypoint'].get(block=True, timeout=5)
         except Queue.Full:
-            print 'SRsim robot: odor sample queue is full, is algorithm platform running?'
+            if self.objs_comm_process['sim_state'][2] == -1: # client stopped
+                self.flush_queues()
+            else:
+                print 'SRsim robot: odor sample queue is full, is algorithm platform (client) running?'
         except Queue.Empty:
-            print 'SRsim robot: robot waypoint queue is empty, is algorithm platform running?'
+            if self.objs_comm_process['sim_state'][2] == -1: # client stopped
+                self.flush_queues()
+            else:
+                print 'SRsim robot: robot waypoint queue is empty, is algorithm platform (client) running?'
+
+    def flush_queues(self):
+    # flush contents of queues of communication
+        if not self.objs_comm_process['odor_sample'].empty():
+            tmp = self.objs_comm_process['odor_sample'].get()
+        if not self.objs_comm_process['robot_waypoint'].empty():
+            tmp = self.objs_comm_process['robot_waypoint'].get()
 
 # multiple robots
 class Robots:

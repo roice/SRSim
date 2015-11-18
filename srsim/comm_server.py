@@ -44,6 +44,8 @@ class CommServer:
         sock.bind(('localhost', 60000))
         sock.listen(1) # permit only one connection
         print "SRsim server is listenting port 6000 of address: " + 'localhost'
+        # tell main process the address&port sucessfully bind
+        self.shared_sim_state[1] = 1
         while True:
             # wait for client
             connection,address = sock.accept()
@@ -72,6 +74,10 @@ class CommServer:
                         if str_recv.find('[') >= 0 and str_recv.find(']') >= 0:
                             self.queue_robot_waypoint.put(eval(str_recv), \
                                     block=True, timeout=5)
+                        else:
+                            # seems connection failed, or client closed
+                            self.shared_sim_state[2] = -1 # tell main process that client stopped
+                            self.flush_queues()
                 elif buf == '$SRsim?start?': # if sim started
                         # client is asking whether the sim is started or not
                         #  send start/end state of sim to the client
@@ -81,12 +87,25 @@ class CommServer:
                             connection.send('$SRsim=start=')
                 connection.close()
             except socket.timeout:
-                print 'SRsim server connection time out'
+                print 'SRsim server connection time out, seems client broke connection'
+                self.flush_queues()
+                if self.shared_sim_state[0] == 1: # if sim's running
+                    self.shared_sim_state[2] = -1 # tell main process that client stopped
             except Queue.Full:
-                print 'SRsim server queue full'
+                if self.shared_sim_state[0] == 1: # if sim's running
+                    print "SRsim sim doesn't receive robot waypoint from server, it's weird"
+                self.flush_queues()
             except Queue.Empty:
-                print 'SRsim server queue empty'
+                if self.shared_sim_state[0] == 1: # if sim's running
+                    print "SRsim server can't get odor sample, it's weird"
+                self.flush_queues()
 
+    def flush_queues(self):
+        # flush queues
+        if not self.queue_odor_sample.empty():
+            tmp = self.queue_odor_sample.get()
+        if not self.queue_robot_waypoint.empty():
+            tmp = self.queue_robot_waypoint.get()
 
 ##############################################################################
 # Execute if running this script

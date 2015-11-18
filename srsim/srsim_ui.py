@@ -42,13 +42,9 @@ from time import sleep
 # SRsim project
 import srsim_config as Config
 from srsim_loop import SimulationThread
-from srsim_wind import Advection
-from srsim_plume import FilamentModel
-from srsim_robot import Robot
 # Robot drawing
 from tvtk.tools import visual
-# for debug
-from sys import exit
+
 
 #############################################################################
 #! Global parameters
@@ -129,6 +125,7 @@ class ControlPanel(HasTraits):
     # Data can be updated from outside
     # ---- simulation field grid, which is Tuple of x, y, z arrays
     grid = Tuple(Array, Array, Array)
+    gsize = Float # grid size
     # ---- mean wind flow vector instantaneously
     mean_wind_vector = Tuple(Float, Float, Float)
 
@@ -139,8 +136,8 @@ class ControlPanel(HasTraits):
 
     ###################################
     # ======== Streamlines ========
-    wind_field = Instance(HasTraits)
-    odor_field = None
+    wind_field = None # vector field, mayavi
+    odor_field = None # scatter, mayavi
     odor_source = None # use visual to display a cylinder as the source
     robot_draw = None # use visual.frame to draw a robot
 
@@ -149,8 +146,6 @@ class ControlPanel(HasTraits):
     # simulation thread
     sim_thread = Instance(SimulationThread)
     scene = Instance(MlabSceneModel)
-    wind = Advection()
-    robot = Robot()
 
     ###################################
     # view
@@ -411,11 +406,12 @@ class ControlPanel(HasTraits):
         pos = Config.get_robot_init_pos()
         return pos[2]
 
+    def _gsize_default(self):
+        return Config.get_wind_grid_size()
 
     def _grid_default(self):
-        gsize = Config.get_wind_grid_size()
-        x, y, z = np.mgrid[gsize/2.0:self.area_length:gsize, gsize/2.0:self.area_width:gsize,
-                gsize/2.0:self.area_height:gsize]
+        x, y, z = np.mgrid[self.gsize/2.0:self.area_length:self.gsize, self.gsize/2.0:self.area_width:self.gsize,
+                self.gsize/2.0:self.area_height:self.gsize]
         return x, y, z
 
     def _mean_wind_vector_default(self):
@@ -444,59 +440,38 @@ class ControlPanel(HasTraits):
     # ======== Listening ========
     @on_trait_change('scene.activated')
     def init_scene(self):
-        # init params of wind model
-        l, w, h = np.array(self.grid).shape[1:4] # 1 2 3
-        self.wind.xyz_n = [l, w, h]
-        gsize = Config.get_wind_grid_size()
-        self.wind.gsize = gsize
-        self.wind.mean_flow = list(self.mean_wind_vector)
-        cn_p = Config.get_wind_colored_noise_params()
-        self.wind.G = cn_p[0]
-        self.wind.wind_damping = cn_p[1]
-        self.wind.wind_bandwidth = cn_p[2]
-        # init scene
-        #   init wind vector field obj
-        self.wind.uniform_tinv()
-        u, v, w = self.wind.wind_vector_field
-        x, y, z = self.grid
-        self.wind_field = self.scene.mlab.quiver3d(x, y, z, u, v, w, reset_zoom=False)
-        #   init odor source pos obj
+        # init wind field object, mayavi
+        self.func_wind_field_obj_init()
+        # init odor source pos object, visual
         visual.set_viewer(self.scene) # tell visual to use this scene as the viewer
         op = Config.get_odor_source_pos() # get init odor source pos
-        #self.odor_source = visual.cylinder(pos=(op[0], op[1], 0), axis = (0, 0, 1), \
-        #        length = op[2], radius = 0.1)
         self.odor_source = visual.box(pos=(op[0], op[1], op[2]/2.0), length = 0.1, \
                 height = 0.1, width = op[2], color = (0x05/255.0, 0x5f/255.0,0x58/255.0), )
-        #   init robot drawing obj
+        # init robot drawing obj, visual
         rp = Config.get_robot_init_pos()
         self.func_init_robot_shape(rp)
+        # init wind vane obj, visual, indicating mean wind vector
+        self.func_init_wind_vane()
         # axes and outlines
         self.func_init_axes_outline()
         # camera view
         self.scene.mlab.view(*Config.get_camera_view())
+        # check if TCP/IP address/port is successfully bind
+        if self.objs_comm_process['sim_state'][1] == 1:
+            self.textbox_sim_state_display = 'Listenting to localhost:60000'
+        elif self.objs_comm_process['sim_state'][1] == -1:
+            self.textbox_sim_state_display = 'Error: Cannot bind localhost:60000'
 
     @on_trait_change('area_length, area_width, area_height')
     def change_area_size(self):
         # change mesh grid to new shape
-        gsize = Config.get_wind_grid_size() # get advection grid size
-        x, y, z = np.mgrid[gsize/2.0:self.area_length:gsize, gsize/2.0:self.area_width:gsize,
-                gsize/2.0:self.area_height:gsize]
-        self.grid = x, y, z
-        # update self.wind.xyz_n
-        self.wind.xyz_n = np.array(self.grid).shape[1:4] # 1 2 3
-
-        # re-init plotting
-        # speed up plotting
+        self.grid = np.mgrid[self.gsize/2.0:self.area_length:self.gsize, \
+                self.gsize/2.0:self.area_width:self.gsize,
+                self.gsize/2.0:self.area_height:self.gsize]
+        # reset wind_field object, mayavi
         self.scene.disable_render = True
-        # clean figure
-        self.scene.mlab.clf()
-        # draw wind vector field
-        self.wind.uniform_tinv()
-        u, v, w = self.wind.wind_vector_field
         self.wind_field.remove()
-        self.wind_field = self.scene.mlab.quiver3d(x, y, z, u, v ,w, reset_zoom=False)
-        # draw axes & outline
-        self.func_init_axes_outline()
+        self.func_wind_field_obj_init()
         self.scene.disable_render = False
         # save area setting to global settings
         Config.set_sim_area_size([self.area_length, self.area_width, self.area_height])
@@ -516,20 +491,13 @@ class ControlPanel(HasTraits):
     def change_advection_mean_vector(self):
         self.mean_wind_vector = self.advection_mean_x,\
                 self.advection_mean_y, self.advection_mean_z
-        #save mean wind vector setting to global settings
+        # save mean wind vector setting to global settings
         Config.set_mean_wind_vector(list(self.mean_wind_vector))
-        # update self.wind.mean_flow
-        self.wind.mean_flow = list(self.mean_wind_vector)
-        # draw wind vector field
-        self.wind.uniform_tinv()
-        u, v, w = self.wind.wind_vector_field
-        self.wind_field.mlab_source.set(u=u, v=v, w=w)
+        # change wind vane obj, visual
+        self.func_change_wind_vane(self.mean_wind_vector)
 
     @on_trait_change('wind_colored_noise_g, wind_colored_noise_xi, wind_colored_noise_omega')
     def change_wind_colored_noise_params(self):
-        self.wind.G = self.wind_colored_noise_g
-        self.wind.wind_damping = self.wind_colored_noise_xi
-        self.wind_wind_bandwidth = self.wind_colored_noise_omega
         # save wind colored noise params to global settings
         Config.set_wind_colored_noise_params([self.wind_colored_noise_g, \
                 self.wind_colored_noise_xi, self.wind_colored_noise_omega])
@@ -562,7 +530,6 @@ class ControlPanel(HasTraits):
         ''' Callback of the "start/stop simulation" button, this starts
             the simulation thread, or kills it
         '''
-
         if self.sim_thread and self.sim_thread.isAlive():
             # kill simulation thread if it's running
             self.sim_thread.wants_abort = True
@@ -576,75 +543,68 @@ class ControlPanel(HasTraits):
             # check if need re-init scene
             if self.sim_thread: # if sim_thread != None, i.e., if sim_thread once excecuted
                 # re-init scene
-                self.odor_field.remove()
                 self.wind_field.remove()
-                self.wind.uniform_tinv()
-                u, v, w = self.wind.wind_vector_field
-                x, y, z = self.grid
-                self.wind_field = self.scene.mlab.quiver3d(x, y, z, u, v, w, reset_zoom=False)
-            # print simulator settings
+                self.func_wind_field_obj_init()
+                self.odor_field.remove()
+
+            # print simulator settings & clear sim step/time count
             self.textbox_sim_state_display = '' # clear display
             sim_area_str = 'Sim Area (L*W*H): %.1f m * %.1f m * %.1f m\n\
                     Grid size: %.1f m' %(self.area_length, self.area_width,
                             self.area_height, Config.get_wind_grid_size())
             sim_wind_str = 'Wind type: ' + str(self.enum_advection_model) + '\n' \
                     + '  Mean wind vector = ' + str(self.mean_wind_vector)
-            if self.enum_advection_model == 'irrotational':
+            if self.enum_advection_model == 'irrotational' or self.enum_advection_model == 'uniform':
                 sim_wind_str += '\n' + '  Colored noise Params: ' + '\n' \
-                        + '    G = ' + str(self.wind.G) + '\n' \
-                        + '    wind_damping = ' + str(self.wind.wind_damping) + '\n' \
-                        + '    wind_bandwidth = ' + str(self.wind.wind_bandwidth)
+                        + '    G = ' + str(self.wind_colored_noise_g) + '\n' \
+                        + '    wind_damping = ' + str(self.wind_colored_noise_xi) + '\n' \
+                        + '    wind_bandwidth = ' + str(self.wind_colored_noise_omega)
             self.add_text_line('====== Settings ======' + '\n' +
                     sim_area_str + '\n' + sim_wind_str + '\n' + '====== Simulation started ======')
-            # create & start simulation thread
-            self.sim_thread = SimulationThread()
-            # sim visual update function
-            self.sim_thread.update_scene = self.func_event_update_scene
             # clear sim step/time count
             self.text_sim_step_count = 0
             self.text_sim_time_count = '0.0 s'
-            # sim step count function
-            self.sim_thread.count_sim_step = self.func_sim_step_count
+
+            # --- create & start simulation thread
+            self.sim_thread = SimulationThread()
+            # --- Params convert to sim thread
+            self.sim_thread.stop_simulation = self.func_sim_thread_killed_itself
             self.sim_thread.sim_dt = self.sim_dt # for sim thread use to calculate sim time
-            # sim textbox state display function
-            self.sim_thread.display = self.add_text_line
-            # wind sim instance
-            self.sim_thread.wind = self.wind
-            self.wind.dt = self.sim_dt
-            # send wind model selection to sim_thread
-            self.sim_thread.wind_model = self.enum_advection_model
-            # plume sim instance
-            if self.enum_plume_model == 'farrell':
-                self.sim_thread.plume = FilamentModel()
-                self.sim_thread.plume.odor_source_pos = [self.init_odor_source_pos_x,\
+            self.sim_thread.sim_area_size = [self.area_length, self.area_width, self.area_height]
+            self.sim_thread.odor_source_pos = [self.init_odor_source_pos_x,\
                     self.init_odor_source_pos_y, self.init_odor_source_pos_z]
-                self.sim_thread.plume.sim_area_size = [self.area_length, self.area_width, self.area_height]
-                self.sim_thread.plume.dt = self.sim_dt
-                self.sim_thread.plume.adv_mesh = self.grid
-                self.sim_thread.plume.adv_xyz_n = self.wind.xyz_n
-                self.sim_thread.plume.adv_gsize = self.wind.gsize
-                self.sim_thread.plume.vm_sigma = self.fila_centerline_dispersion_sigma
-                self.sim_thread.plume.fila_growth_rate = self.fila_growth_rate
-                self.sim_thread.plume.fila_number_per_sec = self.fila_release_per_sec
-                self.odor_field = self.scene.mlab.points3d([0.0], [0.0], [0.0], [0.0], \
+            self.sim_thread.wind_gsize = self.gsize
+            self.sim_thread.wind_mesh = self.grid
+            self.sim_thread.wind_model = self.enum_advection_model
+            self.sim_thread.wind_mean_flow = self.mean_wind_vector
+            self.sim_thread.wind_G = self.wind_colored_noise_g
+            self.sim_thread.wind_damping = self.wind_colored_noise_xi
+            self.sim_thread.wind_bandwidth = self.wind_colored_noise_omega
+            self.sim_thread.plume_vm_sigma = self.fila_centerline_dispersion_sigma
+            self.sim_thread.plume_fila_growth_rate = self.fila_growth_rate
+            self.sim_thread.plume_fila_number_per_sec = self.fila_release_per_sec
+            self.sim_thread.robot_init_pos = [self.init_robot_pos_x, \
+                    self.init_robot_pos_y, self.init_robot_pos_z]
+            self.sim_thread.objs_comm_process = self.objs_comm_process
+
+            #   simulation scene update function, it triggs an event to update mayavi streamline
+            self.sim_thread.update_scene = self.func_event_update_scene
+            #   simulation state text function
+            self.sim_thread.add_text_line = self.add_text_line
+            # -- init odor field object, scatter, mayavi
+            self.odor_field = self.scene.mlab.points3d([0.0], [0.0], [0.0], [0.0], \
                         color = (0,0,0), scale_factor=1, reset_zoom=False)
-            else:
-                exit('Error: Other plume model not supported yet...')
-            # robot instance
-            self.sim_thread.robot = self.robot
-            #  robot init position
-            self.robot.robot_pos = [self.init_robot_pos_x, self.init_robot_pos_y, self.init_robot_pos_z]
-            #  odor sampling routine
-            self.robot.odor_sampling = self.sim_thread.plume.odor_conc_value_sampling
-            #  communication process objs, including process handle, queues
-            self.robot.objs_comm_process = self.objs_comm_process
-            # update sim state indicator, tell communication process the sim is starting
-            self.objs_comm_process['sim_state'][0] = 1
-            # start simulation thread
+            # --- start simulation thread
             self.sim_thread.start()
+            # update sim state indicator, tell communication process the sim started
+            self.objs_comm_process['sim_state'][0] = 1
+            # clear client state
+            self.objs_comm_process['sim_state'][2] = 0
 
     def _event_need_update_scene_fired(self):
-        # if scene switch is turned on (default)
+        # count sim step/time
+        self.func_sim_step_count()
+        # update scene, if scene switch is turned on (default)
         if self.sim_scene_switch == True:
             self.scene.disable_render = True
             self.func_update_scene()
@@ -666,19 +626,81 @@ class ControlPanel(HasTraits):
     def func_event_update_scene(self):
         self.event_need_update_scene = True
 
+    # sim thread killed itself
+    def func_sim_thread_killed_itself(self):
+        # enable area size changing item (GUI)
+        self.params_allow_change = True
+        # update sim state indicator, tell communication process the sim will end
+        self.objs_comm_process['sim_state'][0] = 0
+
     def func_sim_step_count(self):
         # count sim step
         self.text_sim_step_count += 1
         # count sim time
         self.text_sim_time_count = '%.2f s' %(self.text_sim_step_count*self.sim_dt)
 
+    def func_wind_field_obj_init(self):
+        # init wind vector field object, mayavi
+        x, y, z = self.grid
+        u, v, w = np.zeros_like(self.grid)
+        self.wind_field = self.scene.mlab.quiver3d(x, y, z, u, v, w, reset_zoom=False,)
+
+    # update scene
+    def func_update_scene(self):
+        # update wind field display
+        u, v, w = self.sim_thread.wind_vector_field
+        self.wind_field.mlab_source.set(u=u, v=v, w=w)
+        # update odor field display
+        fila = self.sim_thread.plume_snapshot
+        # update obj
+        self.odor_field.mlab_source.reset(x=fila['x'], y=fila['y'], z=fila['z'], scalars=fila['r']*50)
+        self.odor_field.mlab_source.set(x=fila['x']) # to trig display refresh
+
     # draw axes & outlines on current scene
     def func_init_axes_outline(self):
-        self.scene.mlab.axes( xlabel = 'X East (m)', ylabel = 'Y North (m)',
-                zlabel = 'Z Up (m)', ranges = [0, self.area_length, 0,
-                    self.area_width, 0, self.area_height],)
+        # draw outline
         self.scene.mlab.outline(extent=[0, self.area_length, 0,
             self.area_width, 0, self.area_height],)
+        # draw axes labels
+        ax_label_x = 'West-East/X %.1f m' %(self.area_length)
+        ax_label_y = 'North-South/Y %.1f m' %(self.area_width)
+        ax_label_z = 'Up-Down/Z %.1f m' %(self.area_height)
+        #  determine text scale
+        ax_text_scale = min(self.area_length, self.area_width, self.area_height) \
+                / float(max(len(ax_label_x), len(ax_label_y), len(ax_label_z)))
+        self.scene.mlab.text3d(\
+                (self.area_length - ax_text_scale*len(ax_label_x))/2., \
+                -1.5*ax_text_scale, 0, ax_label_x, orient_to_camera=False, scale=ax_text_scale)
+        self.scene.mlab.text3d(\
+                -.5*ax_text_scale, \
+                (self.area_width - ax_text_scale*len(ax_label_y))/2., \
+                0, ax_label_y, orient_to_camera=False, scale=ax_text_scale, orientation=np.array([0,0,90]))
+        self.scene.mlab.text3d(\
+                -1.*ax_text_scale, -1.*ax_text_scale, \
+                (self.area_height - ax_text_scale*len(ax_label_z))/2., \
+                ax_label_z, orient_to_camera=False, scale=ax_text_scale, orientation=np.array([0,270,315]))
+
+    # update wind vane, the color and direction
+    def func_change_wind_vane(self, mean_w_v):
+        v = mean_w_v
+        # paint color according to wind strength
+        strength = (v[0]**2 + v[1]**2 + v[2]**2)**0.5 # get wind strength
+        # convert strength to Red-Blue color map
+        #  0 m/s:   0xFF0000 red
+        #  10 m/s:  0x0000FF blue
+        if strength > 10.: # 10 m/s is very strong
+            strength = 10.
+        RGB = int((0xFF0000 - 0x0000FF)/10.*strength)
+        self.wind_vane.color=(RGB/0x10000/255., (RGB - RGB/0x10000*0x10000 - RGB%0x100)/0x100/255., (RGB%0x100)/255.)
+        # direction
+        self.wind_vane.axis = (v[0], v[1], v[2])
+
+    # init wind vane drawing
+    def func_init_wind_vane(self):
+        # draw an arrow as a wind vane, at the original point
+        self.wind_vane = visual.arrow(pos=(0,0,0))
+        self.func_change_wind_vane(self.mean_wind_vector)
+
 
     # init robot shape drawing
     def func_init_robot_shape(self, robot_pos):
@@ -696,17 +718,6 @@ class ControlPanel(HasTraits):
         # robot shape is a frame composites different objects
         self.robot_draw = visual.frame(p1, p2, p3, p4)
         self.robot_draw.pos = (robot_pos[0], robot_pos[1], robot_pos[2])
-
-    # update scene
-    def func_update_scene(self):
-        # update wind field display
-        u, v, w = self.sim_thread.wind_vector_field
-        self.wind_field.mlab_source.set(u=u, v=v, w=w)
-        # update odor field display
-        fila = self.sim_thread.plume_snapshot
-        # update obj
-        self.odor_field.mlab_source.reset(x=fila['x'], y=fila['y'], z=fila['z'], scalars=fila['r']*50)
-        self.odor_field.mlab_source.set(x=fila['x']) # to trig display refresh
 
     # slice 3d mesh matrix to smaller matrix for quick display
     '''
@@ -760,15 +771,6 @@ class MainWindow(HasTraits):
     # control panel
     panel = Instance(ControlPanel)
 
-    # === Params configured from outside
-    # communication process
-    comm_process = None
-    # odor sampling queue
-    queue_odor_sample = None
-    # robot navigation waypoint queue
-    queue_robot_waypoint = None
-    # simulation state indicator
-    shared_sim_state = None
 
     ##################################
     # Trait handlers

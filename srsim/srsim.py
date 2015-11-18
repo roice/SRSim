@@ -55,9 +55,16 @@ queue_robot_waypoint = multiprocessing.Queue(maxsize=1) # input robot waypoints
 # create shared states for data transfering
 #  Although it's not safe to use shared states, but there's no choice
 # simulation state indicator
-# [start/end, ...]
+# [start/end, comm_state, client_state, ...]
 # start/end: simulation is running when start/end == 1, ended when start/end == 0
-shared_sim_state = multiprocessing.Array('i', [0, 0])
+# comm_state: communication state
+#             if value is -1:   address/port bind failed
+#             if value is 1:    normal state
+# client_state: client state
+#             if value is 0:    no client
+#             if value is 1:    normal, linking
+#             if value is -1:   seems suddenly stopped
+shared_sim_state = multiprocessing.Array('i', [0, -1, 0])
 
 # create communication process
 comm_process = multiprocessing.Process(target=communication, args=(\
