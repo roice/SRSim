@@ -194,7 +194,7 @@ class FilamentModel:
         self.vm_sigma = 2.0 # m/s/sqr(Hz), float
         self.fila_growth_rate = 0.001 # expand 0.001 meter per second
         self.fila_number_per_sec = 10 # release 10 fila per sec, integer
-        self.odor_release_rate = 10.0 # molecules/s, must be float
+        self.odor_release_rate = 10000.0 # molecules/s, must be float
         self.mole_per_filament = self.odor_release_rate/self.fila_number_per_sec
 
 # plume model wrapper

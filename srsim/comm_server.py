@@ -59,9 +59,11 @@ class CommServer:
         while True:
             # wait for client
             connection,address = sock.accept()
+            # client is connecting, tell main process
+            self.shared_sim_state[2] = 1
             try:
                 # establish connection, set time out
-                connection.settimeout(10) # timeout 10 sec
+                connection.settimeout(5) # timeout sec
                 # receive request from client
                 buf = connection.recv(1024)
                 # see what the client requests
@@ -75,7 +77,7 @@ class CommServer:
                     else:
                         #  get odor sample value
                         odor_sample = self.queue_odor_sample.get(\
-                                    block=True, timeout=5) # timeout 5 sec
+                                    block=True, timeout=3) # timeout sec
                         #  send odor value
                         connection.send(str(odor_sample))
                         #  get robot waypoint
@@ -83,7 +85,7 @@ class CommServer:
                         #  check if it's valid data
                         if str_recv.find('[') >= 0 and str_recv.find(']') >= 0:
                             self.queue_robot_waypoint.put(eval(str_recv), \
-                                    block=True, timeout=5)
+                                    block=True, timeout=3)
                         else:
                             # seems connection failed, or client closed
                             self.shared_sim_state[2] = -1 # tell main process that client stopped
@@ -98,9 +100,15 @@ class CommServer:
                 connection.close()
             except socket.timeout:
                 print 'SRsim server connection time out, seems client broke connection'
-                self.flush_queues()
                 if self.shared_sim_state[0] == 1: # if sim's running
-                    self.shared_sim_state[2] = -1 # tell main process that client stopped
+                    if self.shared_sim_state[2] == 1: # if main process thought the client's linking
+                        self.shared_sim_state[2] = -1 # tell main process that client stopped
+                    elif self.shared_sim_state[2] == -2: # probably there's no client while sim's running
+                        self.shared_sim_state[2] = -2 # tell main process that there's no client
+                else: # if sim's not running
+                    if self.shared_sim_state[2] != -2:
+                        self.shared_sim_state[2] = -2
+                self.flush_queues()
             except Queue.Full:
                 if self.shared_sim_state[0] == 1: # if sim's running
                     print "SRsim sim doesn't receive robot waypoint from server, it's weird"

@@ -62,7 +62,7 @@ class ResultPlot:
 
     # === Params for internal data exchanging
     odor_time_series = None # odor sample list, time series
-    len_recent_sample_disp = 10 # number of recent samples which will display on the sensor reading subplot
+    len_recent_sample_disp = 100 # number of recent samples which will display on the sensor reading subplot
     # plot switch
     switch_odor_reading_plot = False # plot odor reading if True
     # plot clean flag, the fig is clean if True

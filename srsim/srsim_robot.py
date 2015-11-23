@@ -64,18 +64,28 @@ class Robot:
         try:
             # send to communication process via queue
             self.objs_comm_process['odor_sample'].put(\
-                [self.sim_step*self.sim_dt, odor_conc], block=True, timeout=5)
-            waypoint = self.objs_comm_process['robot_waypoint'].get(block=True, timeout=5)
+                [self.sim_step*self.sim_dt, odor_conc], block=True, timeout=3)
+            waypoint = self.objs_comm_process['robot_waypoint'].get(block=True, timeout=3)
         except Queue.Full:
-            if self.objs_comm_process['sim_state'][2] == -1: # client stopped
+            if self.objs_comm_process['sim_state'][2] == -1 \
+                    or self.objs_comm_process['sim_state'][2] == -2: # client suddenly stopped or not exist
                 self.flush_queues()
-            else:
+            elif self.objs_comm_process['sim_state'][2] == 1: # probably client just closed
                 print 'SRsim robot: odor sample queue is full, is algorithm platform (client) running?'
-        except Queue.Empty:
-            if self.objs_comm_process['sim_state'][2] == -1: # client stopped
+                self.objs_comm_process['sim_state'][2] = -2 # tell main process client not running
                 self.flush_queues()
-            else:
+            # As the sim_thread has a mechanism to detect client alive/stop and kill itself
+            #  so there's no need to stop sim_thread here
+        except Queue.Empty:
+            if self.objs_comm_process['sim_state'][2] == -1 \
+                    or self.objs_comm_process['sim_state'][2] == -2: # client stopped or not exist
+                self.flush_queues()
+            elif self.objs_comm_process['sim_state'][2] == 1: # probably client just closed
                 print 'SRsim robot: robot waypoint queue is empty, is algorithm platform (client) running?'
+                self.objs_comm_process['sim_state'][2] = -2 # tell main process client not running
+                self.flush_queues()
+            # As the sim_thread has a mechanism to detect client alive/stop and kill itself
+            #  so there's no need to stop sim_thread here
 
     def flush_queues(self):
     # flush contents of queues of communication

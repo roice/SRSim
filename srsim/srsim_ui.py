@@ -658,8 +658,6 @@ class ControlPanel(HasTraits):
             self.sim_thread.start()
             # update sim state indicator, tell communication process the sim started
             self.objs_comm_process['sim_state'][0] = 1
-            # clear client state
-            self.objs_comm_process['sim_state'][2] = 0
 
     def _event_need_update_scene_fired(self):
         # count sim step/time
