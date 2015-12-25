@@ -77,6 +77,8 @@ class ControlPanel(HasTraits):
     sim_dt = Float
     # sim scene display switch
     sim_scene_switch = Bool
+    # record switch
+    sim_record_switch = Bool
     # simulation step count
     text_sim_step_count = Int
     # simulation time count
@@ -196,8 +198,13 @@ class ControlPanel(HasTraits):
                         editor = BooleanEditor( mapping={
                                                     "on":True,
                                                     "off":False}),
-                        label = 'Scene switch',
-                        enabled_when = "params_allow_change == True")),
+                        label = 'Scene switch'),
+                        Item('sim_record_switch',
+                        editor = BooleanEditor( mapping={
+                                                    "on":True,
+                                                    "off":False}),
+                        label = 'Record switch'),
+                        enabled_when = "params_allow_change == True"),
                     VGroup(
                         Item('text_sim_step_count',
                             editor = TextEditor(    auto_set = False,
@@ -387,6 +394,9 @@ class ControlPanel(HasTraits):
     def _sim_scene_switch_default(self):
         return True
 
+    def _sim_record_switch_default(self):
+        return False
+
     def _params_allow_change_default(self):
         return True
 
@@ -513,13 +523,17 @@ class ControlPanel(HasTraits):
     @on_trait_change('area_length, area_width, area_height')
     def change_area_size(self):
         # change mesh grid to new shape
-        self.grid = np.mgrid[self.gsize/2.0:self.area_length:self.gsize, \
+        x, y, z = np.mgrid[self.gsize/2.0:self.area_length:self.gsize, \
                 self.gsize/2.0:self.area_width:self.gsize,
                 self.gsize/2.0:self.area_height:self.gsize]
+        self.grid = x, y, z
         # reset wind_field object, mayavi
         self.scene.disable_render = True
+        self.scene.mlab.clf() # clean figure
         self.wind_field.remove()
         self.func_wind_field_obj_init()
+        # update axes & outline, mayavi
+        self.func_init_axes_outline()
         self.scene.disable_render = False
         # save area setting to global settings
         Config.set_sim_area_size([self.area_length, self.area_width, self.area_height])
