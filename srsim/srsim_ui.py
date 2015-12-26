@@ -38,12 +38,15 @@ from mayavi import mlab
 from mayavi.core.ui.api import MlabSceneModel, SceneEditor, MayaviScene
 # Thread related imports
 from threading import Thread
-from time import sleep
+import time
 # SRsim project
 import srsim_config as Config
 from srsim_loop import SimulationThread
 # Robot drawing
 from tvtk.tools import visual
+# record file operation
+import os, sys # for abs path & directory
+import scipy.io as sio
 
 
 #############################################################################
@@ -668,6 +671,15 @@ class ControlPanel(HasTraits):
             # -- init odor field object, scatter, mayavi
             self.odor_field = self.scene.mlab.points3d([0.0], [0.0], [0.0], [0.0], \
                         color = (0,0,0), scale_factor=1, reset_zoom=False)
+            # create record data directory if record switch is turned on (default off)
+            if self.sim_record_switch == True:
+                # create a directory named as: srsim_record_[date]_[time]
+                p = sys.path[0] # dir of this script
+                self.record_dir = p[0:p.index('SRSim/srsim')] + 'srsim_record_' + \
+                        time.strftime('%Y-%m-%d_%H%M%S',time.localtime(time.time()))
+                os.mkdir(self.record_dir)
+                # create file containing wind grid/mesh info
+                sio.savemat(self.record_dir + '/wind_mesh.mat', {'wind_mesh': self.grid})
             # --- start simulation thread
             self.sim_thread.start()
             # update sim state indicator, tell communication process the sim started
@@ -681,6 +693,16 @@ class ControlPanel(HasTraits):
             self.scene.disable_render = True
             self.func_update_scene()
             self.scene.disable_render = False
+        # record wind & fila data, if record switch is turned on (default off)
+        if self.sim_record_switch == True:
+            # create a file containing wind data of this moment/step
+            #  name: wind_[step].mat
+            sio.savemat(self.record_dir + '/wind_' + str(self.text_sim_step_count) + '.mat', \
+                    {'wind_vector': self.sim_thread.wind_vector_field})
+            # create a file containing fila data of this moment/step
+            #  name: fila_[step].mat
+            sio.savemat(self.record_dir + '/fila_' + str(self.text_sim_step_count) + '.mat', \
+                    {'fila': self.sim_thread.plume_snapshot})
 
     def _button_save_camera_angle_fired(self):
         cam = self.scene.mlab.view()
@@ -822,7 +844,7 @@ class MainWindowHandler(Handler):
                 and info.object.panel.sim_thread.isAlive()):
             info.object.panel.sim_thread.wants_abort = True
             while info.object.panel.sim_thread.isAlive():
-                sleep(0.1)
+                time.sleep(0.1)
         # close communication process
         if info.object.panel.objs_comm_process['process']:
             info.object.panel.objs_comm_process['process'].terminate()
