@@ -11,9 +11,13 @@ class AeroOlfactEnvPlot:
     # central positon of the helicopter e.g., [x m, y m, z m]
     hc_pos = [1, 2, 3] # meter
     # attitude [yaw, pitch, roll]
-    hc_attitude = [20, 20, 20] # degree
+    hc_attitude = [0, 0, 0] # degree
     # azimuth angle step
-    delta_psi = 1 # degree
+    delta_psi = 10 # degree
+    # rotational speed
+    rotor_rpm = 100 # rounds per minite
+    # vortex circulation
+    Gamma = 0.001
 
 
     # init fuction when create an instance of this class
@@ -87,16 +91,30 @@ class AeroOlfactEnvPlot:
         # init plot wake vortex fila
         if self.draw_vortex_fila: # if order to draw fila
             self.plot_vortex_fila = [] # list containing 4x2 fila plot handlers
+            markers = np.array(self.vortex_markers)
             for i in range(len(self.hc_rotors_pos)):
-                x = np.array(self.vortex_markers)[:, i, 0, 0]
-                y = np.array(self.vortex_markers)[:, i, 0, 1]
-                z = np.array(self.vortex_markers)[:, i, 0, 2]
+                x = markers[:, i, 0, 0]
+                y = markers[:, i, 0, 1]
+                z = markers[:, i, 0, 2]
                 b1 = self.ax.plot3D(x, y, z)[0]
-                x = np.array(self.vortex_markers)[:, i, 1, 0]
-                y = np.array(self.vortex_markers)[:, i, 1, 1]
-                z = np.array(self.vortex_markers)[:, i, 1, 2]
+                x = markers[:, i, 1, 0]
+                y = markers[:, i, 1, 1]
+                z = markers[:, i, 1, 2]
                 b2 = self.ax.plot3D(x, y, z)[0]
                 self.plot_vortex_fila.append([b1, b2])
+        # init plot wake flow vectors
+        if self.draw_flow_vectors: # if order to draw flow vectors
+            # calculate flow vectors, mesh grid 0.1 m
+            area = [1., 1., 1.] # helicopter is at the center of this area
+            self.mesh_flow_vectors = np.mgrid[\
+                    self.hc_pos[0]-area[0]/2:self.hc_pos[0]+area[0]/2:0.2,\
+                    self.hc_pos[1]-area[1]/2:self.hc_pos[1]+area[1]/2:0.2,\
+                    self.hc_pos[2]-area[2]/2:self.hc_pos[2]+area[2]/2:0.2 ]
+            vectors = self.calc_flow_vectors(self.mesh_flow_vectors)
+            if vectors == None:
+                x, y, z = self.mesh_flow_vectors
+                u, v, w = np.zeros_like(self.mesh_flow_vectors)
+                self.plot_flow_vectors = self.ax.quiver3D(x, y, z, u, v, w, length=0.05)
         # preserve equal ratio of axis coordinates
         plt.axis('equal')
         # setup animation
@@ -115,6 +133,10 @@ class AeroOlfactEnvPlot:
 
     # animation plot update function
     def plot_update(self, plot_data):
+        # adjust axis ranges
+        self.ax.set_xlim3d([self.hc_pos[0] - 1, self.hc_pos[0] + 1])
+        self.ax.set_ylim3d([self.hc_pos[1] - 1, self.hc_pos[1] + 1])
+        self.ax.set_zlim3d([self.hc_pos[2] - 1, self.hc_pos[2] + 1])
         # plot wake vortex fila
         if self.draw_vortex_fila: # if order to draw fila
             for i in range(len(self.hc_rotors_pos)):
@@ -124,38 +146,45 @@ class AeroOlfactEnvPlot:
                     z = plot_data[:, i, j, 2]
                     self.plot_vortex_fila[i][j].set_data(x, y)
                     self.plot_vortex_fila[i][j].set_3d_properties(z)
+        # plot wake flow vectors
+        if self.draw_flow_vectors: # if order to draw flow vectors
+            x, y, z = self.mesh_flow_vectors
+            u, v, w = self.calc_flow_vectors(self.mesh_flow_vectors)
+            self.ax.collections.remove(self.plot_flow_vectors)
+            self.plot_flow_vectors = self.ax.quiver3D(x, y, z, u, v, w, length=0.05)
 
     # compute init
     def compute_init(self):
         # info of markers, [pos_x, pos_y, pos_z]
-        # vortex_markers is a iterative_steps(N_markers/4) x 4(rotors) x 2(blades) x 3(pos) matrix
+        # vortex_markers is a iterative_steps(N_markers/8) x 4(rotors) x 2(blades) x 3(pos) matrix
         self.vortex_markers = []
         # calculate init vortex markers
         self.vortex_markers.append(self.position_blade_tips(self.hc_pos, self.hc_attitude, self.psi_init))
+        # calculate rotation speed, assume speed of all rotors are equal
+        self.Omega = self.rotor_rpm*2*np.pi/60 # rad/s
+        # calculate delta time
+        self.delta_t = self.delta_psi/self.Omega # s
         # init compute step
         self.step = 1
 
     # wake computation
     def compute_update_wake(self):
+        ############### Simple Backward Difference #################
+        # update positions of markers
+        N_m = len(self.vortex_markers) # number of straight-line vortex segments
+        N_r = len(self.hc_rotors_pos) # number of rotors
+        N_b = 2 # only two-blade is considered
+        for index_m in range(N_m-1):
+            for index_r in range(N_r):
+                for index_b in range(N_b):
+                    self.vortex_markers[index_m][index_r, index_b] +=\
+                            self.calc_induced_vel(self.vortex_markers[index_m][index_r, index_b])*self.delta_t
         # release new markers
         psi = np.array(self.psi_init) +\
                 self.step*np.array([self.delta_psi*self.psi_dir[i] for i in range(len(self.psi_dir))])
         pos_tips = self.position_blade_tips(self.hc_pos, self.hc_attitude, psi)
         self.vortex_markers.append(pos_tips)
-
-        '''
-        if len(self.vortex_markers) > 4:
-            for i in range(4):
-                a = self.vortex_markers[i]-self.vortex_markers[i+1]
-                length = math.sqrt(math.pow(a[0], 2) + math.pow(a[1], 2) + math.pow(a[2], 2))
-                print('len'+str(i)+'to'+str(i+1)+'is'\
-                        +str(length))
-        '''
-
-        # adjust axis ranges
-        self.ax.set_xlim3d([self.hc_pos[0] - 1, self.hc_pos[0] + 1])
-        self.ax.set_ylim3d([self.hc_pos[1] - 1, self.hc_pos[1] + 1])
-        self.ax.set_zlim3d([self.hc_pos[2] - 1, self.hc_pos[2] + 1])
+        # update step index
         self.step += 1
 
     # calculate the position of the blade tips
@@ -208,6 +237,90 @@ class AeroOlfactEnvPlot:
         R_x = np.array([[1, 0, 0],\
                 [0, cos_roll, -sin_roll], [0, sin_roll, cos_roll]])
         return np.dot(np.dot(np.dot(R_z, R_y), R_x), vector)
+
+    # Induced velocity calculation function
+    # compute the induced velocity at a point
+    def calc_induced_vel(self, point):
+        markers = np.array(self.vortex_markers)
+        N_m = len(markers) # number of straight-line vortex segments
+        N_r = len(self.hc_rotors_pos) # number of rotors
+        N_b = 2 # only two-blade is considered
+        p = point # position of this point
+        ind_v = np.array([0., 0., 0.]) # overall induced velocity at this point
+        for index_m in range(N_m-1):
+            for index_r in range(N_r):
+                for index_b in range(N_b):
+                    if self.psi_dir[index_r] > 1: # counter-clockwise
+                        a = markers[index_m, index_r, index_b] # point A of segment
+                        b = markers[index_m+1, index_r, index_b] # point B of segment
+                    else: # clockwise
+                        a = markers[index_m+1, index_r, index_b]
+                        b = markers[index_m, index_r, index_b]
+                    # AP, BP and AB vector
+                    ap = p - a
+                    bp = p - b
+                    ab = b - a
+
+                    if (np.isclose(a, b) == np.array([True, True, True])).all()\
+                            or (np.isclose(a, p) == np.array([True, True, True])).all()\
+                            or (np.isclose(b, p) == np.array([True, True, True])).all():
+                        continue
+
+                    # cos \theta_1 and cos \theta_2
+                    cos_theta_1 = np.dot(ab, ap)/(np.linalg.norm(ab)*np.linalg.norm(ap))
+                    cos_theta_2 = np.dot(ab, bp)/(np.linalg.norm(ab)*np.linalg.norm(bp))
+                    if cos_theta_1 - cos_theta_2 <= 0.0000000001:
+                        continue
+                    # h, perpendicular distance from P to AB
+                    h = np.linalg.norm(ap) * math.sqrt(1 - math.pow(cos_theta_1, 2))
+                    # e, unit vector indicating the dir of induced velocity
+                    e = np.cross(ap, bp)
+                    e = e/np.linalg.norm(e)
+                    # induced velocity of this segment
+                    ind_v += self.Gamma/(4*np.pi)*(h/math.sqrt(math.pow(0.001,4)+math.pow(h,4)))*(cos_theta_1-cos_theta_2)*e
+        return ind_v
+
+    # non-critical
+    # calculation of flow vectors, for display
+    def calc_flow_vectors(self, mesh):
+        markers = np.array(self.vortex_markers)
+        if len(markers) >= 2: # at least 2 markers
+            vectors = np.zeros_like(mesh)
+            N_m = len(markers) # number of straight-line vortex segments
+            N_r = len(self.hc_rotors_pos) # number of rotors
+            N_b = 2 # only two-blade is considered
+            for i in range(len(mesh[0])): # x index
+                for j in range(len(mesh[0, 0])): # y index
+                    for k in range(len(mesh[0, 0, 0])): # z index
+                        p = mesh[:, i, j, k] # position of this grid
+                        ind_v = np.array([0., 0., 0.]) # overall induced velocity at this point
+                        for index_m in range(N_m-1):
+                            for index_r in range(N_r):
+                                for index_b in range(N_b):
+                                    if self.psi_dir[index_r] > 1: # counter-clockwise
+                                        a = markers[index_m, index_r, index_b] # point A of segment
+                                        b = markers[index_m+1, index_r, index_b] # point B of segment
+                                    else: # clockwise
+                                        a = markers[index_m+1, index_r, index_b]
+                                        b = markers[index_m, index_r, index_b]
+                                    # AP, BP and AB vector
+                                    ap = p - a
+                                    bp = p - b
+                                    ab = b - a
+                                    # cos \theta_1 and cos \theta_2
+                                    cos_theta_1 = np.dot(ab, ap)/(np.linalg.norm(ab)*np.linalg.norm(ap))
+                                    cos_theta_2 = np.dot(ab, bp)/(np.linalg.norm(ab)*np.linalg.norm(bp))
+                                    # h, perpendicular distance from P to AB
+                                    h = np.linalg.norm(ap) * math.sqrt(1 - math.pow(cos_theta_1, 2))
+                                    # e, unit vector indicating the dir of induced velocity
+                                    e = np.cross(ap, bp)
+                                    e = e/np.linalg.norm(e)
+                                    # induced velocity of this segment
+                                    ind_v += self.Gamma/(4*np.pi*h)*(cos_theta_1-cos_theta_2)*e
+                        vectors[:, i, j, k] = ind_v
+            return vectors
+        else:
+            return None
 
     def handle_close(self, evt):
         print('Closed, bye~')
