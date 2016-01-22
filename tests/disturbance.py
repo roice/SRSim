@@ -7,21 +7,13 @@ import matplotlib.animation as animation
 
 class AeroOlfactEnvPlot:
 
-    # QuadRotor
-    # init pos, central positon of the quadrotor
-    qr_init_pos = [2, 2, 2] # meter
-    # wheelbase of quadrotor, the distance of two diagonal rotors
-    qr_wb = 0.45 # meter
-    rotor_radius = 0.15
+    # Helicopter
+    # central positon of the helicopter e.g., [x m, y m, z m]
+    hc_pos = [1, 2, 3] # meter
     # attitude [yaw, pitch, roll]
-    qr_init_attitude = [0, 0, 0] # degree
-
-    # Assume that all rotors are two-bladed
-    # Right-Hand direction
-    # init angles of blades
-    psi_init = [0, 0, 0, 0] # degree
-    # rotor evolve direction
-    psi_dir = [1, -1, 1, -1]
+    hc_attitude = [20, 20, 20] # degree
+    # azimuth angle step
+    delta_psi = 1 # degree
 
 
     # init fuction when create an instance of this class
@@ -32,13 +24,58 @@ class AeroOlfactEnvPlot:
         # check validation of plot command, 'command' is a string list, e.g., ['wake_fila', '...']
         for order in command:
             # check if command is valid
-            if order == 'vortex_fila':
+            if order == 'octo_copter': # UAV configuration is quad rotor
+                self.helicopter_type = 'octo'
+            elif order == 'hexa_copter':
+                self.helicopter_type = 'hexa'
+            elif order == 'quad_copter':
+                self.helicopter_type = 'quad'
+            elif order == 'tri_copter':
+                self.helicopter_type = 'tri'
+            elif order == 'bi_copter':
+                self.helicopter_type = 'bi'
+            elif order == 'single_copter':
+                self.helicopter_type = 'single'
+            elif order == 'vortex_fila':
                 self.draw_vortex_fila = True
             elif order == 'flow_vectors':
                 self.draw_flow_vectors = True
             else:
                 exit('Error: plot command "' + str(order) + \
                     '" is not supported')
+        # init parameters related to copter configuration
+        if self.helicopter_type == 'quad':
+            # positions of rotors when the helicopter is heading north (y-axis) and centered at the origin
+            #  if the helicopter is a quadrotor, then
+            #   hc_rotors_pos = [[x_1,y_1,0],[x_2,y_2,0],[x_3,y_3,0],[x_4,y_4,0]] unit: meter
+            self.hc_rotors_pos = [ [-0.45/1.4142135, 0.45/1.4142135, 0],\
+                [-0.45/1.4142135, -0.45/1.4142135, 0],\
+                [0.45/1.4142135, -0.45/1.4142135, 0],\
+                [0.45/1.4142135, 0.45/1.4142135, 0] ]# quad-rotor with wheelbase of 0.45 m, X
+            # Assume that all rotors are two-bladed
+            #  Right-Hand direction
+            #   init azimuth angles of blades, degree
+            #    start from y-axis
+            self.psi_init = [0, 0, 0, 0] # quad-rotor
+            # rotor evolve direction
+            self.psi_dir = [1, -1, 1, -1] # quad-rotor
+            self.rotor_radius = 0.15
+        elif self.helicopter_type == 'tri':
+            self.hc_rotors_pos = [ [0, 0.2, 0],\
+                [-math.cos(30*np.pi/180)*0.2, -math.sin(30*np.pi/180)*0.2, 0],\
+                [math.cos(30*np.pi/180)*0.2, -math.sin(30*np.pi/180)*0.2, 0] ] # tri-rotor with wheelbase/2 of 0.2 m
+            self.psi_init = [0, 0, 0] # tri-rotor
+            self.psi_dir = [1, -1, 1] # tri-rotor
+            self.rotor_radius = 0.15
+        elif self.helicopter_type == 'single':
+            self.hc_rotors_pos = [ [0, 0, 0] ]
+            self.psi_init = [0]
+            self.psi_dir = [1]
+            self.rotor_radius = 0.5
+        # check if configurations are right
+        if not ( (len(self.hc_rotors_pos) == len(self.psi_init))\
+                and (len(self.psi_init) == len(self.psi_dir)) ):
+            exit('Error: helicopter not appropriately configured')
         # init computation
         self.compute_init()
 
@@ -48,17 +85,20 @@ class AeroOlfactEnvPlot:
         fig = plt.figure()
         self.ax = axes3d.Axes3D(fig)
         # init plot wake vortex fila
-        if self.draw_vortex_fila:
-            x = np.array(self.vortex_markers)[:, 0]
-            y = np.array(self.vortex_markers)[:, 1]
-            z = np.array(self.vortex_markers)[:, 2]
-            self.plot_vortex_fila, = self.ax.plot3D(x, y, z)
-
-        # set axes properties
-        #self.ax.set_xlim3d([0, 100])
-        #self.ax.set_ylim3d([0, 100])
-        #self.ax.set_zlim3d([0, 100])
-
+        if self.draw_vortex_fila: # if order to draw fila
+            self.plot_vortex_fila = [] # list containing 4x2 fila plot handlers
+            for i in range(len(self.hc_rotors_pos)):
+                x = np.array(self.vortex_markers)[:, i, 0, 0]
+                y = np.array(self.vortex_markers)[:, i, 0, 1]
+                z = np.array(self.vortex_markers)[:, i, 0, 2]
+                b1 = self.ax.plot3D(x, y, z)[0]
+                x = np.array(self.vortex_markers)[:, i, 1, 0]
+                y = np.array(self.vortex_markers)[:, i, 1, 1]
+                z = np.array(self.vortex_markers)[:, i, 1, 2]
+                b2 = self.ax.plot3D(x, y, z)[0]
+                self.plot_vortex_fila.append([b1, b2])
+        # preserve equal ratio of axis coordinates
+        plt.axis('equal')
         # setup animation
         ani = animation.FuncAnimation(fig, self.plot_update, self.plot_data_generator,\
                 blit=False, interval=10, repeat=False)
@@ -71,66 +111,71 @@ class AeroOlfactEnvPlot:
     def plot_data_generator(self):
         while True:
             self.compute_update_wake()
-            yield self.vortex_markers
+            yield np.array(self.vortex_markers)
 
     # animation plot update function
     def plot_update(self, plot_data):
         # plot wake vortex fila
-        if self.draw_vortex_fila:
-            x = np.array(plot_data)[:, 0]
-            y = np.array(plot_data)[:, 1]
-            z = np.array(plot_data)[:, 2]
-            self.plot_vortex_fila.set_data(x, y)
-            self.plot_vortex_fila.set_3d_properties(z)
+        if self.draw_vortex_fila: # if order to draw fila
+            for i in range(len(self.hc_rotors_pos)):
+                for j in range(2): # 2 blades
+                    x = plot_data[:, i, j, 0]
+                    y = plot_data[:, i, j, 1]
+                    z = plot_data[:, i, j, 2]
+                    self.plot_vortex_fila[i][j].set_data(x, y)
+                    self.plot_vortex_fila[i][j].set_3d_properties(z)
 
     # compute init
     def compute_init(self):
         # info of markers, [pos_x, pos_y, pos_z]
-        # vortex_markers is a iterative_steps(N_markers/4) x 4(rotors) x 3(pos) matrix
+        # vortex_markers is a iterative_steps(N_markers/4) x 4(rotors) x 2(blades) x 3(pos) matrix
         self.vortex_markers = []
         # calculate init vortex markers
-        #  calc the position of the init marker of 1st rotor
-        Rot_psi = np.array([ [math.cos(self.psi_init[0]), -math.sin(self.psi_init[0]), 0],\
-                [math.sin(self.psi_init[0]), math.cos(self.psi_init[0]), 0], [0, 0, 1] ])
-        pos_marker_r1 = self.rotate_vector(\
-                np.dot(Rot_psi, np.array([0, self.rotor_radius, 0]))\
-                + self.qr_wb/2./1.4142135*np.array([-1, 1, 0]),\
-                self.qr_init_attitude[0], self.qr_init_attitude[1], self.qr_init_attitude[2])\
-                + self.qr_init_pos
-        self.vortex_markers.append(pos_marker_r1)
-        print(str(self.vortex_markers))
+        self.vortex_markers.append(self.position_blade_tips(self.hc_pos, self.hc_attitude, self.psi_init))
         # init compute step
         self.step = 1
 
     # wake computation
     def compute_update_wake(self):
-        psi = np.array(self.psi_init) + self.step*np.array([10,10,10,10])
-        pos_tip = self.position_blade_tips(self.qr_init_pos, self.qr_init_attitude, psi)
-        self.vortex_markers.append(pos_tip[0])
+        # release new markers
+        psi = np.array(self.psi_init) +\
+                self.step*np.array([self.delta_psi*self.psi_dir[i] for i in range(len(self.psi_dir))])
+        pos_tips = self.position_blade_tips(self.hc_pos, self.hc_attitude, psi)
+        self.vortex_markers.append(pos_tips)
+
+        '''
+        if len(self.vortex_markers) > 4:
+            for i in range(4):
+                a = self.vortex_markers[i]-self.vortex_markers[i+1]
+                length = math.sqrt(math.pow(a[0], 2) + math.pow(a[1], 2) + math.pow(a[2], 2))
+                print('len'+str(i)+'to'+str(i+1)+'is'\
+                        +str(length))
+        '''
+
+        # adjust axis ranges
+        self.ax.set_xlim3d([self.hc_pos[0] - 1, self.hc_pos[0] + 1])
+        self.ax.set_ylim3d([self.hc_pos[1] - 1, self.hc_pos[1] + 1])
+        self.ax.set_zlim3d([self.hc_pos[2] - 1, self.hc_pos[2] + 1])
         self.step += 1
 
     # calculate the position of the blade tips
-    def position_blade_tips(self, qr_pos, qr_attitude, psi):
-        sin_psi = np.array([ math.sin(psi[0]*np.pi/180), math.sin(psi[1]*np.pi/180),\
-                math.sin(psi[2]*np.pi/180), math.sin(psi[3]*np.pi/180) ])
-        cos_psi = np.array([ math.cos(psi[0]*np.pi/180), math.cos(psi[1]*np.pi/180),\
-                math.cos(psi[2]*np.pi/180), math.cos(psi[3]*np.pi/180) ])
-        for rotor in range(1):
-            Rot_psi_b1 = np.array([ [cos_psi[rotor], -sin_psi[rotor], 0],\
-                    [sin_psi[rotor], cos_psi[rotor], 0], [0, 0, 1]])
-            Rot_psi_b2 = np.array([ [-cos_psi[rotor], sin_psi[rotor], 0],\
-                    [-sin_psi[rotor], -cos_psi[rotor], 0], [0, 0, 1]])
+    def position_blade_tips(self, hc_pos, hc_attitude, psi):
+        # get number of rotors
+        N_r = len(self.hc_rotors_pos)
+        tips = []
+        for rotor in range(N_r):
             pos_tip_b1 = self.rotate_vector(\
-                np.dot(Rot_psi_b1, np.array([0, self.rotor_radius, 0]))\
-                + self.qr_wb/2./1.4142135*np.array([-1, 1, 0]),\
-                qr_attitude[0], qr_attitude[1], qr_attitude[2])\
-                + qr_pos
+                self.rotate_vector(np.array([0, self.rotor_radius, 0]), psi[rotor], 0, 0)\
+                + np.array(self.hc_rotors_pos[rotor]),\
+                hc_attitude[0], hc_attitude[1], hc_attitude[2])\
+                + hc_pos
             pos_tip_b2 = self.rotate_vector(\
-                np.dot(Rot_psi_b2, np.array([0, self.rotor_radius, 0]))\
-                + self.qr_wb/2./1.4142135*np.array([-1, 1, 0]),\
-                qr_attitude[0], qr_attitude[1], qr_attitude[2])\
-                + qr_pos
-        return np.array([pos_tip_b1, pos_tip_b2])
+                self.rotate_vector(np.array([0, self.rotor_radius, 0]), psi[rotor]+180, 0, 0)\
+                + np.array(self.hc_rotors_pos[rotor]),\
+                hc_attitude[0], hc_attitude[1], hc_attitude[2])\
+                + hc_pos
+            tips.append([pos_tip_b1, pos_tip_b2])
+        return np.array(tips)
 
     # rotate a vector with angles yaw pitch roll (degree)
     # Right-Hand(counterclockwise)
@@ -171,5 +216,5 @@ class AeroOlfactEnvPlot:
 # Execute if running this script
 if __name__ == '__main__':
     # -- plotting
-    plot = AeroOlfactEnvPlot(['vortex_fila'])
+    plot = AeroOlfactEnvPlot(['single_copter', 'vortex_fila'])
     plot.init()
