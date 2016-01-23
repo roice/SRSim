@@ -5,15 +5,17 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import axes3d
 import matplotlib.animation as animation
 
+import fvmlib
+
 class AeroOlfactEnvPlot:
 
     # Helicopter
     # central positon of the helicopter e.g., [x m, y m, z m]
-    hc_pos = [1, 2, 3] # meter
+    hc_pos = [1., 2., 3.] # meter
     # attitude [yaw, pitch, roll]
-    hc_attitude = [0, 0, 0] # degree
+    hc_attitude = [0., 0., 0.] # degree
     # azimuth angle step
-    delta_psi = 10 # degree
+    delta_psi = 30. # degree
     # rotational speed
     rotor_rpm = 100 # rounds per minite
     # vortex circulation
@@ -52,29 +54,29 @@ class AeroOlfactEnvPlot:
             # positions of rotors when the helicopter is heading north (y-axis) and centered at the origin
             #  if the helicopter is a quadrotor, then
             #   hc_rotors_pos = [[x_1,y_1,0],[x_2,y_2,0],[x_3,y_3,0],[x_4,y_4,0]] unit: meter
-            self.hc_rotors_pos = [ [-0.45/1.4142135, 0.45/1.4142135, 0],\
-                [-0.45/1.4142135, -0.45/1.4142135, 0],\
-                [0.45/1.4142135, -0.45/1.4142135, 0],\
-                [0.45/1.4142135, 0.45/1.4142135, 0] ]# quad-rotor with wheelbase of 0.45 m, X
+            self.hc_rotors_pos = [ [-0.45/1.4142135, 0.45/1.4142135, 0.],\
+                [-0.45/1.4142135, -0.45/1.4142135, 0.],\
+                [0.45/1.4142135, -0.45/1.4142135, 0.],\
+                [0.45/1.4142135, 0.45/1.4142135, 0.] ]# quad-rotor with wheelbase of 0.45 m, X
             # Assume that all rotors are two-bladed
             #  Right-Hand direction
             #   init azimuth angles of blades, degree
             #    start from y-axis
-            self.psi_init = [0, 0, 0, 0] # quad-rotor
+            self.psi_init = [0., 0., 0., 0.] # quad-rotor
             # rotor evolve direction
-            self.psi_dir = [1, -1, 1, -1] # quad-rotor
+            self.psi_dir = [1., -1., 1., -1.] # quad-rotor
             self.rotor_radius = 0.15
         elif self.helicopter_type == 'tri':
-            self.hc_rotors_pos = [ [0, 0.2, 0],\
-                [-math.cos(30*np.pi/180)*0.2, -math.sin(30*np.pi/180)*0.2, 0],\
-                [math.cos(30*np.pi/180)*0.2, -math.sin(30*np.pi/180)*0.2, 0] ] # tri-rotor with wheelbase/2 of 0.2 m
-            self.psi_init = [0, 0, 0] # tri-rotor
-            self.psi_dir = [1, -1, 1] # tri-rotor
+            self.hc_rotors_pos = [ [0., 0.2, 0.],\
+                [-math.cos(30*np.pi/180)*0.2, -math.sin(30*np.pi/180)*0.2, 0.],\
+                [math.cos(30*np.pi/180)*0.2, -math.sin(30*np.pi/180)*0.2, 0.] ] # tri-rotor with wheelbase/2 of 0.2 m
+            self.psi_init = [0., 0., 0.] # tri-rotor
+            self.psi_dir = [1., -1., 1.] # tri-rotor
             self.rotor_radius = 0.15
         elif self.helicopter_type == 'single':
-            self.hc_rotors_pos = [ [0, 0, 0] ]
-            self.psi_init = [0]
-            self.psi_dir = [1]
+            self.hc_rotors_pos = [ [0., 0., 0.] ]
+            self.psi_init = [0.]
+            self.psi_dir = [1.]
             self.rotor_radius = 0.5
         # check if configurations are right
         if not ( (len(self.hc_rotors_pos) == len(self.psi_init))\
@@ -91,15 +93,14 @@ class AeroOlfactEnvPlot:
         # init plot wake vortex fila
         if self.draw_vortex_fila: # if order to draw fila
             self.plot_vortex_fila = [] # list containing 4x2 fila plot handlers
-            markers = np.array(self.vortex_markers)
             for i in range(len(self.hc_rotors_pos)):
-                x = markers[:, i, 0, 0]
-                y = markers[:, i, 0, 1]
-                z = markers[:, i, 0, 2]
+                x = self.vortex_markers_pos[:, i, 0, 0]
+                y = self.vortex_markers_pos[:, i, 0, 1]
+                z = self.vortex_markers_pos[:, i, 0, 2]
                 b1 = self.ax.plot3D(x, y, z)[0]
-                x = markers[:, i, 1, 0]
-                y = markers[:, i, 1, 1]
-                z = markers[:, i, 1, 2]
+                x = self.vortex_markers_pos[:, i, 1, 0]
+                y = self.vortex_markers_pos[:, i, 1, 1]
+                z = self.vortex_markers_pos[:, i, 1, 2]
                 b2 = self.ax.plot3D(x, y, z)[0]
                 self.plot_vortex_fila.append([b1, b2])
         # init plot wake flow vectors
@@ -129,7 +130,7 @@ class AeroOlfactEnvPlot:
     def plot_data_generator(self):
         while True:
             self.compute_update_wake()
-            yield np.array(self.vortex_markers)
+            yield self.vortex_markers_pos
 
     # animation plot update function
     def plot_update(self, plot_data):
@@ -155,35 +156,38 @@ class AeroOlfactEnvPlot:
 
     # compute init
     def compute_init(self):
-        # info of markers, [pos_x, pos_y, pos_z]
-        # vortex_markers is a iterative_steps(N_markers/8) x 4(rotors) x 2(blades) x 3(pos) matrix
-        self.vortex_markers = []
+        # pos of markers, [pos_x, pos_y, pos_z]
+        # vortex_markers_pos is a iterative_steps(N_markers/8) x 4(rotors) x 2(blades) x 3(pos) matrix
         # calculate init vortex markers
-        self.vortex_markers.append(self.position_blade_tips(self.hc_pos, self.hc_attitude, self.psi_init))
+        self.vortex_markers_pos = np.array([self.position_blade_tips(self.hc_pos, self.hc_attitude, self.psi_init)])
         # calculate rotation speed, assume speed of all rotors are equal
         self.Omega = self.rotor_rpm*2*np.pi/60 # rad/s
         # calculate delta time
         self.delta_t = self.delta_psi/self.Omega # s
         # init compute step
         self.step = 1
+        # at least 3 markers before update
+        self.release_new_marker()
+        self.release_new_marker()
 
     # wake computation
     def compute_update_wake(self):
         ############### Simple Backward Difference #################
         # update positions of markers
-        N_m = len(self.vortex_markers) # number of straight-line vortex segments
-        N_r = len(self.hc_rotors_pos) # number of rotors
-        N_b = 2 # only two-blade is considered
-        for index_m in range(N_m-1):
-            for index_r in range(N_r):
-                for index_b in range(N_b):
-                    self.vortex_markers[index_m][index_r, index_b] +=\
-                            self.calc_induced_vel(self.vortex_markers[index_m][index_r, index_b])*self.delta_t
+        fvmlib.VF_markers_update_simpleBD(self.vortex_markers_pos, np.array(self.psi_dir), self.delta_t)
+        # release new marker
+        self.release_new_marker()
+        # delete oldest marker
+        N_m = len(self.vortex_markers_pos)
+        if N_m > 200:
+            self.vortex_markers_pos = np.delete(self.vortex_markers_pos, N_m-1, axis=0)
+
+    def release_new_marker(self):
         # release new markers
         psi = np.array(self.psi_init) +\
                 self.step*np.array([self.delta_psi*self.psi_dir[i] for i in range(len(self.psi_dir))])
         pos_tips = self.position_blade_tips(self.hc_pos, self.hc_attitude, psi)
-        self.vortex_markers.append(pos_tips)
+        self.vortex_markers_pos = np.append(self.vortex_markers_pos, np.array([pos_tips]), axis=0)
         # update step index
         self.step += 1
 

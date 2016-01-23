@@ -3,6 +3,7 @@
 
 import numpy as np
 cimport numpy as np
+cimport cython
 
 cdef extern from "math.h":
     double sqrt(double)
@@ -21,6 +22,8 @@ cdef double PI = 3.14159265358979323846
 #    dir_psi:     direction of rotation, 1 for counter-clockwise, -1 otherwise
 #        one dimensional, (num rotors) x 1 matrix
 #    delta_time:  delta t (second)
+@cython.boundscheck(False)
+@cython.wraparound(False)
 def VF_markers_update_simpleBD(
         np.ndarray[dtype_t, ndim=4] pos_markers,
         np.ndarray[dtype_t, ndim=1] dir_psi,
