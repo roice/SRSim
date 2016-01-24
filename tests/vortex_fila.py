@@ -15,7 +15,7 @@ class AeroOlfactEnvPlot:
     # attitude [yaw, pitch, roll]
     hc_attitude = [0., 0., 0.] # degree
     # azimuth angle step
-    delta_psi = 30. # degree
+    delta_psi = 10. # degree
     # rotational speed
     rotor_rpm = 100 # rounds per minite
     # vortex circulation
@@ -179,8 +179,8 @@ class AeroOlfactEnvPlot:
         self.release_new_marker()
         # delete oldest marker
         N_m = len(self.vortex_markers_pos)
-        if N_m > 200:
-            self.vortex_markers_pos = np.delete(self.vortex_markers_pos, N_m-1, axis=0)
+        if N_m > 18:
+            self.vortex_markers_pos = np.delete(self.vortex_markers_pos, 0, axis=0)
 
     def release_new_marker(self):
         # release new markers
