@@ -173,6 +173,12 @@ class AeroOlfactEnvPlot:
         # at least 3 markers before update
         self.release_new_marker()
         self.release_new_marker()
+
+        self.vortex_markers_vel = np.zeros(((360/self.delta_psi)*10, len(self.hc_rotors_pos), 2,3))
+        # the info of 3 previous time steps
+        #self.vortex_markers_pos_pre_2 = np.zeros(((360/self.delta_psi)*10, len(self.hc_rotors_pos), 2,3))
+        #self.vortex_markers_pos_pre_1 = np.zeros(((360/self.delta_psi)*10, len(self.hc_rotors_pos), 2,3))
+        #self.vortex_markers_pos_pre_0 = np.zeros(((360/self.delta_psi)*10, len(self.hc_rotors_pos), 2,3))
         # create a directory named as: srsim_record_[date]_[time]
         p = sys.path[0] # dir of this script
         self.record_dir = p[0:p.index('SRSim/tests')] + 'vf_record_' + \
@@ -184,12 +190,13 @@ class AeroOlfactEnvPlot:
     def compute_update_wake(self):
         ############### Simple Backward Difference #################
         # update positions of markers
-        fvmlib.VF_markers_update_PIPC(self.vortex_markers_pos, np.array(self.psi_dir), self.delta_t)
+        fvmlib.VF_markers_update_PCC(self.vortex_markers_pos, self.vortex_markers_vel,\
+                np.array(self.psi_dir), self.delta_t)
         # release new marker
         self.release_new_marker()
         # delete oldest marker
         N_m = len(self.vortex_markers_pos)
-        if N_m > (360/self.delta_psi)*20: # 20 rounds
+        if N_m > (360/self.delta_psi)*10: # 20 rounds
             self.vortex_markers_pos = np.delete(self.vortex_markers_pos, 0, axis=0)
         # create a file containing data of this moment/step
         #  name: vortex_fila_[step].mat

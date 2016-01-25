@@ -128,6 +128,64 @@ cdef double complete_elliptic_int_second(double k) except *:
 #    delta_time:  delta t (second)
 @cython.boundscheck(False)
 @cython.wraparound(False)
+def VF_markers_update_PCC(
+        np.ndarray[dtype_t, ndim=4] pos_markers,
+        np.ndarray[dtype_t, ndim=4] vel_markers,
+        np.ndarray[dtype_t, ndim=1] dir_psi,
+        double delta_time,
+        ):
+    cdef int N_m = pos_markers.shape[0] # number of markers
+    cdef int N_r = pos_markers.shape[1] # number of rotors, 4 for quadrotor
+    cdef int N_b = pos_markers.shape[2] # num_blades not used, currently only support two-blade
+    cdef Py_ssize_t index_m,index_r,index_b # index of markers, rotors and blades, for point update
+    cdef Py_ssize_t i, j, k # index of markers, rotors and blades, for pointwise induce vel calc
+    cdef np.ndarray[dtype_t, ndim=1] a, b, p # point A, B, P
+    cdef np.ndarray[dtype_t, ndim=1] ind_v # induced velocity
+    cdef np.ndarray[dtype_t, ndim=4] vel_markers_predictor # velocity predictor
+
+    vel_markers_predictor = np.zeros_like(vel_markers)
+
+    # predictor
+    for index_m in range(N_m):
+        for index_r in range(N_r):
+            for index_b in range(N_b):
+                p = pos_markers[index_m, index_r, index_b] # update this marker
+                ind_v = np.zeros(3)
+                for i in range(N_m-1):
+                    for j in range(N_r):
+                        for k in range(N_b):
+                            if dir_psi[j] < 0: # clockwise
+                                a = pos_markers[i, j, k] # point A of this segment
+                                b = pos_markers[i+1, j, k] # point B of this segment
+                            else: # counter-clockwise
+                                a = pos_markers[i+1, j, k]
+                                b = pos_markers[i, j, k]
+                            ind_v += biot_savart_normal(a, b, p)
+                vel_markers_predictor[index_m, index_r, index_b] = ind_v
+                # corrector
+                if index_m == 0 or index_m == N_m-1:
+                    pos_markers[index_m, index_r, index_b] += 0.5*(\
+                            vel_markers[index_m, index_r, index_b]\
+                            + vel_markers_predictor[index_m, index_r, index_b])*delta_time
+                else:
+                    pos_markers[index_m, index_r, index_b] += 0.25*(\
+                            vel_markers[index_m, index_r, index_b]\
+                            + vel_markers[index_m-1, index_r, index_b]\
+                            + vel_markers_predictor[index_m+1, index_r, index_b]\
+                            + vel_markers_predictor[index_m, index_r, index_b])*delta_time               
+
+########################### Vortex Filament Method ##########################
+#
+# update Lagrangian markers
+#  simple backward difference, linear segment 
+#  Input:
+#    pos_markers: positions of markers
+#        (markers per fila) x (num rotors) x (num blades) x 3(pos) matrix
+#    dir_psi:     direction of rotation, 1 for counter-clockwise, -1 otherwise
+#        one dimensional, (num rotors) x 1 matrix
+#    delta_time:  delta t (second)
+@cython.boundscheck(False)
+@cython.wraparound(False)
 def VF_markers_update_PIPC(
         np.ndarray[dtype_t, ndim=4] pos_markers,
         np.ndarray[dtype_t, ndim=1] dir_psi,
