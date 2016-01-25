@@ -11,7 +11,7 @@ class AeroOlfactEnvPlot:
 
     # Helicopter
     # central positon of the helicopter e.g., [x m, y m, z m]
-    hc_pos = [1., 2., 3.] # meter
+    hc_pos = [0., 0., 0.] # meter
     # attitude [yaw, pitch, roll]
     hc_attitude = [0., 0., 0.] # degree
     # azimuth angle step
@@ -94,15 +94,11 @@ class AeroOlfactEnvPlot:
         if self.draw_vortex_fila: # if order to draw fila
             self.plot_vortex_fila = [] # list containing 4x2 fila plot handlers
             for i in range(len(self.hc_rotors_pos)):
-                x = self.vortex_markers_pos[:, i, 0, 0]
-                y = self.vortex_markers_pos[:, i, 0, 1]
-                z = self.vortex_markers_pos[:, i, 0, 2]
+                x = self.pos_rings_cps[0, i, :, 0]
+                y = self.pos_rings_cps[0, i, :, 1]
+                z = self.pos_rings_cps[0, i, :, 2]
                 b1 = self.ax.plot3D(x, y, z)[0]
-                x = self.vortex_markers_pos[:, i, 1, 0]
-                y = self.vortex_markers_pos[:, i, 1, 1]
-                z = self.vortex_markers_pos[:, i, 1, 2]
-                b2 = self.ax.plot3D(x, y, z)[0]
-                self.plot_vortex_fila.append([b1, b2])
+                self.plot_vortex_fila.append([b1])
         # init plot wake flow vectors
         if self.draw_flow_vectors: # if order to draw flow vectors
             # calculate flow vectors, mesh grid 0.1 m
@@ -130,23 +126,22 @@ class AeroOlfactEnvPlot:
     def plot_data_generator(self):
         while True:
             self.compute_update_wake()
-            yield self.vortex_markers_pos
+            yield self.pos_rings_cps
 
     # animation plot update function
     def plot_update(self, plot_data):
         # adjust axis ranges
-        self.ax.set_xlim3d([self.hc_pos[0] - 1, self.hc_pos[0] + 1])
-        self.ax.set_ylim3d([self.hc_pos[1] - 1, self.hc_pos[1] + 1])
-        self.ax.set_zlim3d([self.hc_pos[2] - 1, self.hc_pos[2] + 1])
+        self.ax.set_xlim3d([self.hc_pos[0] - 2, self.hc_pos[0] + 2])
+        self.ax.set_ylim3d([self.hc_pos[1] - 2, self.hc_pos[1] + 2])
+        self.ax.set_zlim3d([self.hc_pos[2] - 2, self.hc_pos[2] + 2])
         # plot wake vortex fila
         if self.draw_vortex_fila: # if order to draw fila
             for i in range(len(self.hc_rotors_pos)):
-                for j in range(2): # 2 blades
-                    x = plot_data[:, i, j, 0]
-                    y = plot_data[:, i, j, 1]
-                    z = plot_data[:, i, j, 2]
-                    self.plot_vortex_fila[i][j].set_data(x, y)
-                    self.plot_vortex_fila[i][j].set_3d_properties(z)
+                x = plot_data[0, i, :, 0]
+                y = plot_data[0, i, :, 1]
+                z = plot_data[0, i, :, 2]
+                self.plot_vortex_fila[i][0].set_data(x, y)
+                self.plot_vortex_fila[i][0].set_3d_properties(z)
         # plot wake flow vectors
         if self.draw_flow_vectors: # if order to draw flow vectors
             x, y, z = self.mesh_flow_vectors
@@ -156,31 +151,34 @@ class AeroOlfactEnvPlot:
 
     # compute init
     def compute_init(self):
-        # pos of markers, [pos_x, pos_y, pos_z]
-        # vortex_markers_pos is a iterative_steps(N_markers/8) x 4(rotors) x 2(blades) x 3(pos) matrix
-        # calculate init vortex markers
-        self.vortex_markers_pos = np.array([self.position_blade_tips(self.hc_pos, self.hc_attitude, self.psi_init)])
+        # pos of ring control points
+        # pos_rings_cps is a (num rings) x (num rotors) x 4(control points) x 3(pos) matrix
+        # create the first ring
+        self.pos_rings_cps = np.zeros((1,1,4,3)) # one ring, one rotor
+        self.pos_rings_cps[0,0,0] = np.array([0.,-1.,0.])
+        self.pos_rings_cps[0,0,1] = np.array([1.,0.,0.])
+        self.pos_rings_cps[0,0,2] = np.array([0.,1.,0.])
+        self.pos_rings_cps[0,0,3] = np.array([-1.,0.,0.])
         # calculate rotation speed, assume speed of all rotors are equal
         self.Omega = self.rotor_rpm*2*np.pi/60 # rad/s
         # calculate delta time
         self.delta_t = self.delta_psi/self.Omega # s
         # init compute step
         self.step = 1
-        # at least 3 markers before update
-        self.release_new_marker()
-        self.release_new_marker()
 
     # wake computation
     def compute_update_wake(self):
         ############### Simple Backward Difference #################
         # update positions of markers
-        fvmlib.VF_markers_update_simpleBD(self.vortex_markers_pos, np.array(self.psi_dir), self.delta_t)
+        print('previous: '+str(self.pos_rings_cps))
+        fvmlib.VR_CP_update_simpleBD(self.pos_rings_cps, 0.01, self.delta_t, self.step)
+        print('after: '+str(self.pos_rings_cps))
         # release new marker
-        self.release_new_marker()
+        #self.release_new_marker()
         # delete oldest marker
-        N_m = len(self.vortex_markers_pos)
-        if N_m > 18:
-            self.vortex_markers_pos = np.delete(self.vortex_markers_pos, 0, axis=0)
+        #N_m = len(self.vortex_markers_pos)
+        #if N_m > 18:
+        #    self.vortex_markers_pos = np.delete(self.vortex_markers_pos, 0, axis=0)
 
     def release_new_marker(self):
         # release new markers

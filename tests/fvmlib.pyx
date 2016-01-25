@@ -26,9 +26,9 @@ def VR_CP_update_simpleBD(
         double delta_time,
         int step
         ):
-    cdef int N_ring = pos_rings[0] # number of rings / rotors
-    cdef int N_rotor = pos_rings[1] # number of rotors
-    #cdef int N_cp = pos_rings[2] # number of control points
+    cdef int N_ring = pos_rings.shape[0] # number of rings / rotors
+    cdef int N_rotor = pos_rings.shape[1] # number of rotors
+    #cdef int N_cp = pos_rings.shape[2] # number of control points
     cdef Py_ssize_t index_ring, index_rotor, index_cp # index of rings, rotors and control points
     cdef Py_ssize_t i, j # index of rings and rotors
     cdef np.ndarray[dtype_t, ndim=1] ind_v # induced velocity
@@ -94,7 +94,6 @@ def VR_CP_update_simpleBD(
     # update simulation step
     step += 1
 
-
 # Vortex Ring Control Point, unit vector indicating the dir of ring
 cdef np.ndarray[dtype_t, ndim=1] calc_ring_dir_vector(np.ndarray[dtype_t, ndim=2] pos_cps):
     cdef np.ndarray[dtype_t, ndim=1] u_vector, temp_1, temp_2
@@ -102,16 +101,20 @@ cdef np.ndarray[dtype_t, ndim=1] calc_ring_dir_vector(np.ndarray[dtype_t, ndim=2
     temp_2 = pos_cps[1]-pos_cps[3]
     u_vector = cross_vectors(temp_1, temp_2)/\
             sqrt(dot_vectors(temp_1, temp_1)*dot_vectors(temp_2, temp_2))
+    return u_vector
 
 # calculate complete elliptic integral of the first kind
 #  using power series method
-cdef double complete_elliptic_int_first(double k):
+cdef double complete_elliptic_int_first(double k) except *:
     return PI/2.*(1. + 0.5*0.5*k*k + 0.5*0.5*0.75*0.75*k*k*k*k)
 
 # calculate complete elliptic integral of the second kind
 #  using power series method
-cdef double complete_elliptic_int_second(double k):
+cdef double complete_elliptic_int_second(double k) except *:
     return PI/2.*(1. - 0.5*0.5*k*k - 0.5*0.5*0.75*0.75*k*k*k*k/3.)
+
+# calculate Gamma
+#def double calculate_gamma(double radius_rotor, double mass_uav)
 
 ########################### Vortex Filament Method ##########################
 #

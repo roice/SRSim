@@ -7,19 +7,23 @@ import matplotlib.animation as animation
 
 import fvmlib
 
+import scipy.io as sio
+import os, sys # for abs path & directory
+import time
+
 class AeroOlfactEnvPlot:
 
     # Helicopter
     # central positon of the helicopter e.g., [x m, y m, z m]
-    hc_pos = [1., 2., 3.] # meter
+    hc_pos = [0.,0., 3.] # meter
     # attitude [yaw, pitch, roll]
     hc_attitude = [0., 0., 0.] # degree
     # azimuth angle step
-    delta_psi = 10. # degree
+    delta_psi = 30. # degree
     # rotational speed
-    rotor_rpm = 100 # rounds per minite
+    rotor_rpm = 6000 # rounds per minite
     # vortex circulation
-    Gamma = 0.001
+    Gamma = 0.011938486
 
 
     # init fuction when create an instance of this class
@@ -77,7 +81,7 @@ class AeroOlfactEnvPlot:
             self.hc_rotors_pos = [ [0., 0., 0.] ]
             self.psi_init = [0.]
             self.psi_dir = [1.]
-            self.rotor_radius = 0.5
+            self.rotor_radius = 0.15
         # check if configurations are right
         if not ( (len(self.hc_rotors_pos) == len(self.psi_init))\
                 and (len(self.psi_init) == len(self.psi_dir)) ):
@@ -135,9 +139,9 @@ class AeroOlfactEnvPlot:
     # animation plot update function
     def plot_update(self, plot_data):
         # adjust axis ranges
-        self.ax.set_xlim3d([self.hc_pos[0] - 1, self.hc_pos[0] + 1])
-        self.ax.set_ylim3d([self.hc_pos[1] - 1, self.hc_pos[1] + 1])
-        self.ax.set_zlim3d([self.hc_pos[2] - 1, self.hc_pos[2] + 1])
+        self.ax.set_xlim3d([self.hc_pos[0] - 0.3, self.hc_pos[0] + 0.3])
+        self.ax.set_ylim3d([self.hc_pos[1] - 0.3, self.hc_pos[1] + 0.3])
+        self.ax.set_zlim3d([self.hc_pos[2] - 0.3, self.hc_pos[2] + 0.3])
         # plot wake vortex fila
         if self.draw_vortex_fila: # if order to draw fila
             for i in range(len(self.hc_rotors_pos)):
@@ -169,6 +173,12 @@ class AeroOlfactEnvPlot:
         # at least 3 markers before update
         self.release_new_marker()
         self.release_new_marker()
+        # create a directory named as: srsim_record_[date]_[time]
+        p = sys.path[0] # dir of this script
+        self.record_dir = p[0:p.index('SRSim/tests')] + 'vf_record_' + \
+                time.strftime('%Y-%m-%d_%H%M%S',time.localtime(time.time()))
+        print('dir='+str(self.record_dir))
+        os.mkdir(self.record_dir)
 
     # wake computation
     def compute_update_wake(self):
@@ -179,8 +189,12 @@ class AeroOlfactEnvPlot:
         self.release_new_marker()
         # delete oldest marker
         N_m = len(self.vortex_markers_pos)
-        if N_m > 18:
+        if N_m > (360/self.delta_psi)*20: # 20 rounds
             self.vortex_markers_pos = np.delete(self.vortex_markers_pos, 0, axis=0)
+        # create a file containing data of this moment/step
+        #  name: vortex_fila_[step].mat
+        sio.savemat(self.record_dir + '/vortex_fila_' + str(self.step) + '.mat', \
+                {'vortex_fila': self.vortex_markers_pos})
 
     def release_new_marker(self):
         # release new markers
