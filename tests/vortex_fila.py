@@ -21,9 +21,9 @@ class AeroOlfactEnvPlot:
     # azimuth angle step
     delta_psi = 30. # degree
     # rotational speed
-    rotor_rpm = 6000 # rounds per minite
+    rotor_rpm = 3000 # rounds per minite
     # vortex circulation
-    Gamma = 0.011938486
+    Gamma = 0.011938486*2
 
 
     # init fuction when create an instance of this class
@@ -184,7 +184,7 @@ class AeroOlfactEnvPlot:
     def compute_update_wake(self):
         ############### Simple Backward Difference #################
         # update positions of markers
-        fvmlib.VF_markers_update_simpleBD(self.vortex_markers_pos, np.array(self.psi_dir), self.delta_t)
+        fvmlib.VF_markers_update_PIPC(self.vortex_markers_pos, np.array(self.psi_dir), self.delta_t)
         # release new marker
         self.release_new_marker()
         # delete oldest marker
