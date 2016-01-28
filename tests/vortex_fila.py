@@ -19,11 +19,12 @@ class AeroOlfactEnvPlot:
     # attitude [yaw, pitch, roll]
     hc_attitude = [0., 0., 0.] # degree
     # azimuth angle step
-    delta_psi = 30. # degree
+    delta_psi = 45. # degree
     # rotational speed
     rotor_rpm = 3000 # rounds per minite
     # vortex circulation
-    Gamma = 0.011938486*2
+    #Gamma = 0.011938486*2
+    Gamma = 1.
 
 
     # init fuction when create an instance of this class
@@ -58,10 +59,10 @@ class AeroOlfactEnvPlot:
             # positions of rotors when the helicopter is heading north (y-axis) and centered at the origin
             #  if the helicopter is a quadrotor, then
             #   hc_rotors_pos = [[x_1,y_1,0],[x_2,y_2,0],[x_3,y_3,0],[x_4,y_4,0]] unit: meter
-            self.hc_rotors_pos = [ [-0.45/1.4142135, 0.45/1.4142135, 0.],\
-                [-0.45/1.4142135, -0.45/1.4142135, 0.],\
-                [0.45/1.4142135, -0.45/1.4142135, 0.],\
-                [0.45/1.4142135, 0.45/1.4142135, 0.] ]# quad-rotor with wheelbase of 0.45 m, X
+            self.hc_rotors_pos = [ [-0.225/1.4142135, 0.225/1.4142135, 0.],\
+                [-0.225/1.4142135, -0.225/1.4142135, 0.],\
+                [0.225/1.4142135, -0.225/1.4142135, 0.],\
+                [0.225/1.4142135, 0.225/1.4142135, 0.] ]# quad-rotor with wheelbase of 0.45 m, X
             # Assume that all rotors are two-bladed
             #  Right-Hand direction
             #   init azimuth angles of blades, degree
@@ -139,9 +140,9 @@ class AeroOlfactEnvPlot:
     # animation plot update function
     def plot_update(self, plot_data):
         # adjust axis ranges
-        self.ax.set_xlim3d([self.hc_pos[0] - 0.3, self.hc_pos[0] + 0.3])
-        self.ax.set_ylim3d([self.hc_pos[1] - 0.3, self.hc_pos[1] + 0.3])
-        self.ax.set_zlim3d([self.hc_pos[2] - 0.3, self.hc_pos[2] + 0.3])
+        self.ax.set_xlim3d([self.hc_pos[0] - 1, self.hc_pos[0] + 1])
+        self.ax.set_ylim3d([self.hc_pos[1] - 1, self.hc_pos[1] + 1])
+        self.ax.set_zlim3d([self.hc_pos[2] - 3, self.hc_pos[2] + 0.5])
         # plot wake vortex fila
         if self.draw_vortex_fila: # if order to draw fila
             for i in range(len(self.hc_rotors_pos)):
@@ -174,7 +175,7 @@ class AeroOlfactEnvPlot:
         self.release_new_marker()
         self.release_new_marker()
 
-        self.vortex_markers_vel = np.zeros(((360/self.delta_psi)*10, len(self.hc_rotors_pos), 2,3))
+        self.vortex_markers_vel = np.zeros(((360/self.delta_psi)*20, len(self.hc_rotors_pos), 2,3))
         # the info of 3 previous time steps
         #self.vortex_markers_pos_pre_2 = np.zeros(((360/self.delta_psi)*10, len(self.hc_rotors_pos), 2,3))
         #self.vortex_markers_pos_pre_1 = np.zeros(((360/self.delta_psi)*10, len(self.hc_rotors_pos), 2,3))
@@ -190,8 +191,13 @@ class AeroOlfactEnvPlot:
     def compute_update_wake(self):
         ############### Simple Backward Difference #################
         # update positions of markers
+        if len(self.vortex_markers_pos) < (360/self.delta_psi)*2:
+            self.free_vel = np.array([0., 0., -0.1])
+        else:
+            self.free_vel = np.array([1., 0., -0.1])
         fvmlib.VF_markers_update_PCC(self.vortex_markers_pos, self.vortex_markers_vel,\
-                np.array(self.psi_dir), self.delta_t)
+                self.free_vel, np.array(self.psi_dir), self.delta_t,\
+                self.Gamma)
         # release new marker
         self.release_new_marker()
         # delete oldest marker
@@ -354,5 +360,5 @@ class AeroOlfactEnvPlot:
 # Execute if running this script
 if __name__ == '__main__':
     # -- plotting
-    plot = AeroOlfactEnvPlot(['single_copter', 'vortex_fila'])
+    plot = AeroOlfactEnvPlot(['quad_copter', 'vortex_fila'])
     plot.init()

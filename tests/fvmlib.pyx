@@ -131,8 +131,10 @@ cdef double complete_elliptic_int_second(double k) except *:
 def VF_markers_update_PCC(
         np.ndarray[dtype_t, ndim=4] pos_markers,
         np.ndarray[dtype_t, ndim=4] vel_markers,
+        np.ndarray[dtype_t, ndim=1] free_vel,
         np.ndarray[dtype_t, ndim=1] dir_psi,
         double delta_time,
+        double Gamma,
         ):
     cdef int N_m = pos_markers.shape[0] # number of markers
     cdef int N_r = pos_markers.shape[1] # number of rotors, 4 for quadrotor
@@ -160,19 +162,19 @@ def VF_markers_update_PCC(
                             else: # counter-clockwise
                                 a = pos_markers[i+1, j, k]
                                 b = pos_markers[i, j, k]
-                            ind_v += biot_savart_normal(a, b, p)
+                            ind_v += biot_savart_normal(a, b, p, Gamma)*(N_m+50 - i)/(N_m+50)
                 vel_markers_predictor[index_m, index_r, index_b] = ind_v
                 # corrector
                 if index_m == 0 or index_m == N_m-1:
-                    pos_markers[index_m, index_r, index_b] += 0.5*(\
+                    pos_markers[index_m, index_r, index_b] += (free_vel + 0.5*(\
                             vel_markers[index_m, index_r, index_b]\
-                            + vel_markers_predictor[index_m, index_r, index_b])*delta_time
+                            + vel_markers_predictor[index_m, index_r, index_b]))*delta_time
                 else:
-                    pos_markers[index_m, index_r, index_b] += 0.25*(\
+                    pos_markers[index_m, index_r, index_b] += (free_vel + 0.25*(\
                             vel_markers[index_m, index_r, index_b]\
                             + vel_markers[index_m-1, index_r, index_b]\
                             + vel_markers_predictor[index_m+1, index_r, index_b]\
-                            + vel_markers_predictor[index_m, index_r, index_b])*delta_time               
+                            + vel_markers_predictor[index_m, index_r, index_b]))*delta_time               
 
 ########################### Vortex Filament Method ##########################
 #
@@ -190,6 +192,7 @@ def VF_markers_update_PIPC(
         np.ndarray[dtype_t, ndim=4] pos_markers,
         np.ndarray[dtype_t, ndim=1] dir_psi,
         double delta_time,
+        double Gamma
         ):
     cdef int N_m = pos_markers.shape[0] # number of markers
     cdef int N_r = pos_markers.shape[1] # number of rotors, 4 for quadrotor
@@ -217,7 +220,7 @@ def VF_markers_update_PIPC(
                             else: # counter-clockwise
                                 a = pos_markers[i+1, j, k]
                                 b = pos_markers[i, j, k]
-                            ind_v += biot_savart_normal(a, b, p)
+                            ind_v += biot_savart_normal(a, b, p, Gamma)
                 pos_markers_predictor[index_m, index_r, index_b] += ind_v*delta_time
     # corrector
     for index_m in range(N_m):
@@ -234,7 +237,7 @@ def VF_markers_update_PIPC(
                             else: # counter-clockwise
                                 a = pos_markers_predictor[i+1, j, k]
                                 b = pos_markers_predictor[i, j, k]
-                            ind_v += biot_savart_normal(a, b, p)
+                            ind_v += biot_savart_normal(a, b, p, Gamma)
                 pos_markers[index_m, index_r, index_b] += 0.5*ind_v*delta_time\
                         + 0.5*(pos_markers_predictor[index_m, index_r, index_b]\
                         - pos_markers[index_m, index_r, index_b])
@@ -255,6 +258,7 @@ def VF_markers_update_simpleBD(
         np.ndarray[dtype_t, ndim=4] pos_markers,
         np.ndarray[dtype_t, ndim=1] dir_psi,
         double delta_time,
+        double Gamma
         ):
     cdef int N_m = pos_markers.shape[0] # number of markers
     cdef int N_r = pos_markers.shape[1] # number of rotors, 4 for quadrotor
@@ -278,9 +282,35 @@ def VF_markers_update_simpleBD(
                             else: # counter-clockwise
                                 a = pos_markers[i+1, j, k]
                                 b = pos_markers[i, j, k]
-                            ind_v += biot_savart_normal(a, b, p)
+                            ind_v += biot_savart_normal(a, b, p, Gamma)
                 pos_markers[index_m, index_r, index_b] += ind_v*delta_time
-                            
+
+# get the vel of a point
+def get_vel_of_point(\
+        np.ndarray[dtype_t, ndim=4] pos_markers,
+        np.ndarray[dtype_t, ndim=1] dir_psi,
+        np.ndarray[dtype_t, ndim=1] p, #point
+        double delta_time,
+        double Gamma,):
+    cdef int N_m = pos_markers.shape[0] # number of markers
+    cdef int N_r = pos_markers.shape[1] # number of rotors, 4 for quadrotor
+    cdef int N_b = pos_markers.shape[2] # num_blades not used, currently only support two-blade
+    cdef Py_ssize_t i, j, k # index of markers, rotors and blades, for pointwise induce vel calc
+    cdef np.ndarray[dtype_t, ndim=1] a, b # point A, B
+    cdef np.ndarray[dtype_t, ndim=1] ind_v # induced velocity
+    ind_v = np.zeros(3)
+    for i in range(N_m-1):
+        for j in range(N_r):
+            for k in range(N_b):
+                if dir_psi[j] < 0: # clockwise
+                    a = pos_markers[i, j, k] # point A of this segment
+                    b = pos_markers[i+1, j, k] # point B of this segment
+                else: # counter-clockwise
+                    a = pos_markers[i+1, j, k]
+                    b = pos_markers[i, j, k]
+                ind_v += biot_savart_normal(a, b, p, Gamma)
+    return ind_v
+            
 # Biot-Savart
 #  Input:
 #    a: position vector of point A
@@ -291,13 +321,13 @@ def VF_markers_update_simpleBD(
 cdef np.ndarray[dtype_t, ndim=1] biot_savart_normal(
         np.ndarray[dtype_t, ndim=1] a,
         np.ndarray[dtype_t, ndim=1] b,
-        np.ndarray[dtype_t, ndim=1] p):
+        np.ndarray[dtype_t, ndim=1] p,
+        double Gamma ):
 
     cdef np.ndarray[dtype_t, ndim=1] ab, ap, bp # vector AB, AP, BP
     cdef np.ndarray[dtype_t, ndim=1] e # unit vector indicating the induced vel direction
     cdef double h # perpendicular distance from P to AB
     cdef double cos_theta_1, cos_theta_2 # cos(theta_1), cos(theta_2)
-    cdef double Gamma = 0.001
 
     # check if P is overlapping with A or B
     if (isclose(a[0], b[0]) and isclose(a[1], b[1]) and isclose(a[2], b[2]))\
@@ -309,14 +339,8 @@ cdef np.ndarray[dtype_t, ndim=1] biot_savart_normal(
     bp = p - b
     ab = b - a
     # cos(theta_1) and cos(theta_2)
-    cos_theta_1 = np.dot(ab, ap)/(norm_vector(ab)*norm_vector(ap))
-    cos_theta_2 = np.dot(ab, bp)/(norm_vector(ab)*norm_vector(bp))
-
-    # check if cos(theta_1) is 1.0
-    if isclose(cos_theta_1, 1.):
-        return 0. # h == 0
-    elif isclose(cos_theta_1 - cos_theta_2, 0.):
-        return 0. # induced vel is zero
+    cos_theta_1 = np.dot(ap, ab)/(norm_vector(ab)*norm_vector(ap))
+    cos_theta_2 = np.dot(-1.*ab, bp)/(norm_vector(ab)*norm_vector(bp))
 
     # h, perpendicular distance from P to AB
     h = norm_vector(ap) * sqrt(1 - cos_theta_1**2)
@@ -324,7 +348,7 @@ cdef np.ndarray[dtype_t, ndim=1] biot_savart_normal(
     e = np.cross(ap, bp)
     e = e/norm_vector(e)
     # induced velocity of this segment
-    return Gamma/(4*PI)*(h/sqrt(0.001**4+h**4))*(cos_theta_1-cos_theta_2)*e
+    return Gamma/(4*PI)*(h/sqrt(0.01**4+h**4))*(cos_theta_1+cos_theta_2)*e
 
 # Biot-Savart
 #  Input:
@@ -336,13 +360,14 @@ cdef np.ndarray[dtype_t, ndim=1] biot_savart_normal(
 cdef np.ndarray[dtype_t, ndim=1] biot_savart_fast(
         np.ndarray[dtype_t, ndim=1] a,
         np.ndarray[dtype_t, ndim=1] b,
-        np.ndarray[dtype_t, ndim=1] p):
+        np.ndarray[dtype_t, ndim=1] p,
+        double Gamma):
 
     cdef np.ndarray[dtype_t, ndim=1] ab, ap, bp # vector AB, AP, BP
     cdef np.ndarray[dtype_t, ndim=1] e # unit vector indicating the induced vel direction
     cdef double sq_h # perpendicular distance^2 from P to AB
     cdef double sq_cos_theta_1, sq_cos_theta_2, cos_theta_1_cos_theta_2 # cos(theta_1)^2, cos(theta_2)^2
-    cdef double Gamma = 0.001
+
     cdef double dot_abab, dot_apap, dot_bpbp, dot_abap, dot_abbp
 
     # check if P is overlapping with A or B
