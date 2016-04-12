@@ -53,29 +53,30 @@ def communication(q_odor_value, q_robot_waypoint, sh_sim_state, mode, address, p
     comm.shared_sim_state = sh_sim_state
     comm.start()
 
-# create queue for data transfer
-queue_odor_sample = multiprocessing.Queue(maxsize=1) # output odor samples
-queue_robot_waypoint = multiprocessing.Queue(maxsize=1) # input robot waypoints
-# create shared states for data transfering
-#  Although it's not safe to use shared states, but there's no choice
-# simulation state indicator
-# [start/end, comm_state, client_state, ...]
-# start/end: simulation is running when start/end == 1, ended when start/end == 0
-# comm_state: communication state
-#             if value is -1:   address/port bind failed
-#             if value is 1:    address/port bind, normal state
-# client_state: client state
-#             if value is -2:    no client
-#             if value is 1:    normal, linking
-#             if value is -1:   seems suddenly stopped
-shared_sim_state = multiprocessing.Array('i', [0, -1, -2])
+if __name__ == '__main__':
+    # create queue for data transfer
+    queue_odor_sample = multiprocessing.Queue(maxsize=1) # output odor samples
+    queue_robot_waypoint = multiprocessing.Queue(maxsize=1) # input robot waypoints
+    # create shared states for data transfering
+    #  Although it's not safe to use shared states, but there's no choice
+    # simulation state indicator
+    # [start/end, comm_state, client_state, ...]
+    # start/end: simulation is running when start/end == 1, ended when start/end == 0
+    # comm_state: communication state
+    #             if value is -1:   address/port bind failed
+    #             if value is 1:    address/port bind, normal state
+    # client_state: client state
+    #             if value is -2:    no client
+    #             if value is 1:    normal, linking
+    #             if value is -1:   seems suddenly stopped
+    shared_sim_state = multiprocessing.Array('i', [0, -1, -2])
 
-# get address & port number from config
-srsim_config.load_settings()
-# create communication process
-comm_process = multiprocessing.Process(target=communication, args=(\
+    # get address & port number from config
+    srsim_config.load_settings()
+    # create communication process
+    comm_process = multiprocessing.Process(target=communication, args=(\
         queue_odor_sample, queue_robot_waypoint, shared_sim_state, \
         srsim_config.get_comm_mode(), srsim_config.get_comm_address(), srsim_config.get_comm_port()))
-comm_process.start()
-# transfer process handle and queues to SRsim GUI
-SRsimUI(comm_process, queue_odor_sample, queue_robot_waypoint, shared_sim_state)
+    comm_process.start()
+    # transfer process handle and queues to SRsim GUI
+    SRsimUI(comm_process, queue_odor_sample, queue_robot_waypoint, shared_sim_state)
